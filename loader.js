@@ -236,6 +236,24 @@
       #cf-badges.show { display:block; }
       #cf-badges img { max-width:100%;height:auto; }
 
+/* Hide native Shopify cart drawer */
+cart-drawer,
+cart-notification,
+.cart-drawer,
+.cart-notification,
+#cart-drawer,
+#CartDrawer,
+#cart-notification,
+[id*="cart-drawer"],
+[class*="cart-drawer"],
+drawer-component[id*="cart"],
+.shopify-section-cart-drawer {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
       @media (max-width: 480px) {
         #cf-drawer { width:100vw; }
       }
