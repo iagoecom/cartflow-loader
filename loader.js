@@ -626,21 +626,6 @@ document.addEventListener('submit', async (e) => {
     }
   }
 }, true);
-```
-
----
-
-### O que muda
-```
-ANTES:
-Tema e CartFlow brigam pelo submit
-→ Um cancela o outro ❌
-
-DEPOIS:
-stopImmediatePropagation() → CartFlow
-assume completamente o submit
-→ Aguarda 100ms para garantir
-→ Abre o carrinho ✅
 
     document.addEventListener('click', async (e) => {
       const t = e.target;
