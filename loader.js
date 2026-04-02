@@ -4,15 +4,36 @@
   const TOKEN = SCRIPT_TAG?.getAttribute('data-token');
   const API_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/config';
   const TRACK_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/track-event';
-const CACHE_KEY = 'cartflow_config';
-const SKU_CACHE_KEY = 'cartflow_sku_cache';
-const SKU_TTL = 30 * 60 * 1000;
+  const SKU_CACHE_KEY = 'cartflow_sku_cache';
+  const SKU_TTL = 30 * 60 * 1000;
 
   if (!TOKEN) {
     console.warn('[CartFlow] data-token not found');
     return;
   }
 
+  // ============================================
+  // FILA DE EVENTOS — clique antes de carregar
+  // ============================================
+  let _cartReady = false;
+  let _pendingOpen = false;
+
+  function onCartReady() {
+    _cartReady = true;
+    if (_pendingOpen) {
+      _pendingOpen = false;
+      fetchShopifyCart().then(cart => {
+        if (window._cfConfig) {
+          renderCart(cart, window._cfConfig);
+          openCart();
+        }
+      });
+    }
+  }
+
+  // ============================================
+  // CURRENCY
+  // ============================================
   function formatPrice(cents) {
     const amount = cents / 100;
     const currency = window.Shopify?.currency?.active || 'USD';
@@ -26,43 +47,45 @@ const SKU_TTL = 30 * 60 * 1000;
     }
   }
 
-async function getConfig() {
-  try {
-    const res = await fetch(`${API_URL}?token=${TOKEN}`);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (e) {
-    // Fallback para cache se Supabase cair
+  // ============================================
+  // CONFIG — sem cache, sempre atualizado
+  // ============================================
+  async function getConfig() {
     try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) return JSON.parse(cached).data;
-    } catch (e2) {}
-    return null;
-  }
-}
-
-  async function trackEvent(eventType, amount = 0, metadata = {}) {
-    try {
-      await fetch(TRACK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: TOKEN,
-          event_type: eventType,
-          amount,
-          metadata
-        })
-      });
-    } catch (e) {}
+      const res = await fetch(`${API_URL}?token=${TOKEN}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      return null;
+    }
   }
 
+  // ============================================
+  // ANALYTICS — não bloqueia
+  // ============================================
+  function trackEvent(eventType, amount = 0, metadata = {}) {
+    fetch(TRACK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: TOKEN,
+        event_type: eventType,
+        amount,
+        metadata
+      })
+    }).catch(() => {});
+  }
+
+  // ============================================
+  // SHOPIFY CART
+  // ============================================
   async function fetchShopifyCart() {
     const res = await fetch('/cart.js');
     return await res.json();
   }
 
   // ============================================
-  // SKU → VARIANT_ID (com cache 30min por loja)
+  // SKU MAP — cache 30min por loja
   // ============================================
   async function getSkuMap(domain) {
     const cacheKey = `${SKU_CACHE_KEY}_${domain}`;
@@ -74,7 +97,6 @@ async function getConfig() {
       }
     } catch (e) {}
 
-    // Buscar todos os produtos da loja white
     const skuMap = {};
     let url = `https://${domain}/products.json?limit=250`;
 
@@ -92,9 +114,8 @@ async function getConfig() {
           }
         }
 
-        // Paginação
         const linkHeader = res.headers.get('Link');
-        if (linkHeader && linkHeader.includes('rel="next"')) {
+        if (linkHeader?.includes('rel="next"')) {
           const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
           url = match ? match[1] : null;
         } else {
@@ -102,10 +123,9 @@ async function getConfig() {
         }
       }
     } catch (e) {
-      console.warn('[CartFlow] Erro ao buscar SKU map:', e);
+      console.warn('[CartFlow] SKU map error:', e);
     }
 
-    // Salvar cache
     try {
       localStorage.setItem(cacheKey, JSON.stringify({
         data: skuMap,
@@ -113,7 +133,7 @@ async function getConfig() {
       }));
     } catch (e) {}
 
-    console.log(`[CartFlow] SKU map carregado: ${Object.keys(skuMap).length} variantes`);
+    console.log(`[CartFlow] SKU map: ${Object.keys(skuMap).length} variants`);
     return skuMap;
   }
 
@@ -129,7 +149,6 @@ async function getConfig() {
         background:rgba(0,0,0,0.5);z-index:999998;
       }
       #cf-overlay.open { display:block; }
-
       #cf-drawer {
         position:fixed;top:0;right:-440px;
         width:420px;max-width:100vw;height:100%;
@@ -141,7 +160,6 @@ async function getConfig() {
         font-family:${v.inherit_fonts ? 'inherit' : 'system-ui,sans-serif'};
       }
       #cf-drawer.open { right:0; }
-
       #cf-header {
         padding:${v.header_height === 'tall' ? '20px' : '14px'} 16px;
         border-bottom:${v.header_border === 'thin' ? '1px solid #e5e7eb' : 'none'};
@@ -155,7 +173,6 @@ async function getConfig() {
         cursor:pointer;color:${v.text_color || '#000'};
         padding:4px;line-height:1;
       }
-
       #cf-announcement {
         padding:${v.announcement_height === 'slim' ? '6px' : v.announcement_height === 'thick' ? '14px' : '10px'} 16px;
         background:${v.announcement_bg_color || '#f2f2f2'};
@@ -164,7 +181,6 @@ async function getConfig() {
         display:none;flex-shrink:0;
       }
       #cf-announcement.show { display:block; }
-
       #cf-rewards {
         padding:10px 16px;
         border-bottom:1px solid #e5e7eb;
@@ -186,11 +202,9 @@ async function getConfig() {
         display:flex;justify-content:space-between;
         font-size:10px;color:#999;
       }
-
       #cf-items { flex:1;overflow-y:auto;padding:12px 16px; }
       .cf-empty { text-align:center;padding:48px 16px;color:#999; }
       .cf-empty-icon { font-size:40px;margin-bottom:12px; }
-
       .cf-item {
         display:flex;gap:12px;padding-bottom:12px;
         margin-bottom:12px;border-bottom:1px solid #f0f0f0;
@@ -217,7 +231,6 @@ async function getConfig() {
         justify-content:center;
       }
       .cf-qty-n { font-size:13px;min-width:20px;text-align:center; }
-
       #cf-upsells {
         padding:10px 16px;border-top:1px solid #f0f0f0;
         flex-shrink:0;display:none;
@@ -245,7 +258,6 @@ async function getConfig() {
         border:none;border-radius:${v.button_radius || 0}px;
         font-size:11px;font-weight:600;cursor:pointer;flex-shrink:0;
       }
-
       #cf-footer {
         padding:14px 16px;
         border-top:1px solid #e5e7eb;flex-shrink:0;
@@ -268,11 +280,10 @@ async function getConfig() {
         letter-spacing:.04em;margin-top:4px;
       }
       #cf-checkout:hover { opacity:.88; }
-
+      #cf-checkout:disabled { opacity:.6;cursor:not-allowed; }
       #cf-badges { margin-top:10px;text-align:center;display:none; }
       #cf-badges.show { display:block; }
       #cf-badges img { max-width:100%;height:auto; }
-
       /* Hide native Shopify cart drawer */
       cart-drawer,cart-notification,.cart-drawer,
       .cart-notification,#cart-drawer,#CartDrawer,
@@ -284,7 +295,6 @@ async function getConfig() {
         opacity:0 !important;
         pointer-events:none !important;
       }
-
       @media (max-width: 480px) {
         #cf-drawer { width:100vw; }
       }
@@ -292,6 +302,9 @@ async function getConfig() {
     document.head.appendChild(style);
   }
 
+  // ============================================
+  // HTML
+  // ============================================
   function injectHTML(v) {
     const overlay = document.createElement('div');
     overlay.id = 'cf-overlay';
@@ -328,6 +341,9 @@ async function getConfig() {
     document.body.appendChild(overlay);
   }
 
+  // ============================================
+  // OPEN / CLOSE
+  // ============================================
   function openCart() {
     document.getElementById('cf-overlay')?.classList.add('open');
     document.getElementById('cf-drawer')?.classList.add('open');
@@ -340,6 +356,9 @@ async function getConfig() {
     document.body.style.overflow = '';
   }
 
+  // ============================================
+  // RENDER
+  // ============================================
   function renderCart(cart, config) {
     const v = config.visual || {};
     const items = cart.items || [];
@@ -373,7 +392,6 @@ async function getConfig() {
           const saving = hasDiscount
             ? formatPrice((item.original_price - item.price) * item.quantity)
             : null;
-
           return `
             <div class="cf-item">
               <img class="cf-img"
@@ -404,30 +422,25 @@ async function getConfig() {
       }
     }
 
+    // Rewards
     const rewards = config.rewards || [];
     if (rewards.length > 0 && v.rewards_enabled) {
       const rwEl = document.getElementById('cf-rewards');
       if (rwEl) {
         rwEl.classList.add('show');
-        const calc = v.rewards_calculation || 'cart_total';
-        const value = calc === 'cart_total'
+        const value = (v.rewards_calculation || 'cart_total') === 'cart_total'
           ? cart.total_price / 100
           : items.reduce((a, i) => a + i.quantity, 0);
         const last = rewards[rewards.length - 1];
         const next = rewards.find(t => t.minimum_value > value);
         const pct = Math.min((value / last.minimum_value) * 100, 100);
-
         const textEl = rwEl.querySelector('.cf-rw-text');
         const fillEl = rwEl.querySelector('.cf-rw-fill');
         const tiersEl = rwEl.querySelector('.cf-rw-tiers');
-
         if (textEl) {
-          if (next) {
-            const rem = (next.minimum_value - value).toFixed(0);
-            textEl.textContent = (next.title_before || '').replace('{remaining}', rem);
-          } else {
-            textEl.textContent = v.rewards_complete_text || 'All benefits unlocked! 🎉';
-          }
+          textEl.textContent = next
+            ? (next.title_before || '').replace('{remaining}', (next.minimum_value - value).toFixed(0))
+            : (v.rewards_complete_text || 'All benefits unlocked! 🎉');
         }
         if (fillEl) fillEl.style.width = `${pct}%`;
         if (tiersEl) {
@@ -438,22 +451,18 @@ async function getConfig() {
       }
     }
 
+    // Upsells
     const upsells = config.upsells || [];
     if (upsells.length > 0 && v.upsells_enabled) {
       const upEl = document.getElementById('cf-upsells');
       if (upEl) {
         upEl.classList.add('show');
         upEl.innerHTML = `
-          <div class="cf-up-title">
-            ${v.upsells_title || 'RECOMMENDED FOR YOU'}
-          </div>
+          <div class="cf-up-title">${v.upsells_title || 'RECOMMENDED FOR YOU'}</div>
           ${upsells.map(p => `
             <div class="cf-up-item">
-              <img class="cf-up-img"
-                src="${p.image_url || ''}"
-                alt="${p.title}"
-                onerror="this.style.display='none'"
-              />
+              <img class="cf-up-img" src="${p.image_url || ''}" alt="${p.title}"
+                onerror="this.style.display='none'"/>
               <div>
                 <div class="cf-up-name">${p.title}</div>
                 <div class="cf-up-price">${formatPrice(p.price * 100)}</div>
@@ -468,11 +477,12 @@ async function getConfig() {
       }
     }
 
+    // Subtotal
     const subEl = document.getElementById('cf-subtotal');
     if (subEl) subEl.textContent = formatPrice(cart.total_price);
 
-    const totalOrig = items.reduce((a, i) =>
-      a + (i.original_price || i.price) * i.quantity, 0);
+    // Savings
+    const totalOrig = items.reduce((a, i) => a + (i.original_price || i.price) * i.quantity, 0);
     const totalSaved = totalOrig - cart.total_price;
     if (totalSaved > 0) {
       const savRow = document.getElementById('cf-savings');
@@ -481,6 +491,7 @@ async function getConfig() {
       if (savVal) savVal.textContent = `−${formatPrice(totalSaved)}`;
     }
 
+    // Trust badges
     if (v.trust_badges_enabled && v.trust_badges_image_url) {
       const bdEl = document.getElementById('cf-badges');
       if (bdEl) {
@@ -491,26 +502,23 @@ async function getConfig() {
   }
 
   // ============================================
-  // ROUTED CHECKOUT — busca variant_id pelo SKU
+  // CHECKOUT ROTEADO
   // ============================================
   async function buildCheckoutUrl(cartItems, config) {
     const domain = config.routing?.active_store?.domain;
     if (!domain) return null;
 
-    // Buscar SKU map da loja white (com cache)
     const skuMap = await getSkuMap(domain);
     if (!skuMap || Object.keys(skuMap).length === 0) {
-      console.warn('[CartFlow] SKU map vazio para:', domain);
+      console.warn('[CartFlow] SKU map empty for:', domain);
       return null;
     }
 
     const lineItems = cartItems
       .map(item => {
-        const sku = item.sku;
-        if (!sku) return null;
-        const variantId = skuMap[sku];
+        const variantId = skuMap[item.sku];
         if (!variantId) {
-          console.warn(`[CartFlow] SKU não encontrado: ${sku}`);
+          console.warn(`[CartFlow] SKU not found: ${item.sku}`);
           return null;
         }
         return `${variantId}:${item.quantity}`;
@@ -521,6 +529,9 @@ async function getConfig() {
     return `https://${domain}/cart/${lineItems.join(',')}`;
   }
 
+  // ============================================
+  // GLOBAL FUNCTIONS
+  // ============================================
   window.cfQty = async (key, qty) => {
     if (qty < 0) return;
     await fetch('/cart/change.js', {
@@ -545,119 +556,113 @@ async function getConfig() {
     }
   };
 
+  // ============================================
+  // INTERCEPT CART
+  // ============================================
   function interceptCart() {
+
+    // Intercepta fetch /cart/add
     const origFetch = window.fetch;
     window.fetch = async (...args) => {
-  const url = String(args[0] || '');
-  const result = await origFetch.apply(window, args);
-  if (url.includes('/cart/add') && !url.includes('track-event')) {
-    try {
-      // Verificar se o add foi bem sucedido
-      const addResult = result.clone();
-      const addData = await addResult.json();
-      
-      // Só abre se adicionou com sucesso
-      if (addData && (addData.id || addData.items)) {
-        const cart = await fetchShopifyCart();
-        if (window._cfConfig) {
-          renderCart(cart, window._cfConfig);
-          openCart();
-        }
+      const url = String(args[0] || '');
+      const result = await origFetch.apply(window, args);
+      if (url.includes('/cart/add') && !url.includes('track-event')) {
+        try {
+          const data = await result.clone().json();
+          if (data?.id || data?.items) {
+            const cart = await fetchShopifyCart();
+            if (_cartReady && window._cfConfig) {
+              renderCart(cart, window._cfConfig);
+              openCart();
+            } else {
+              _pendingOpen = true;
+            }
+          }
+        } catch (e) {}
       }
-    } catch (e) {
-      // Fallback — tenta abrir mesmo assim
+      return result;
+    };
+
+    // Intercepta form submit
+    document.addEventListener('submit', async (e) => {
+      const form = e.target;
+      const isCart = form.action?.includes('/cart/add') || form.querySelector('[name="add"]');
+      if (!isCart) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      const btn = form.querySelector('[type="submit"],[name="add"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.dataset.orig = btn.textContent;
+        btn.textContent = 'Adding...';
+      }
+
       try {
-        const cart = await fetchShopifyCart();
-        if (window._cfConfig) {
-          renderCart(cart, window._cfConfig);
-          openCart();
+        const fd = new FormData(form);
+        const res = await fetch('/cart/add.js', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: fd.get('id'),
+            quantity: parseInt(fd.get('quantity') || '1')
+          })
+        });
+        if (res.ok) {
+          const cart = await fetchShopifyCart();
+          if (_cartReady && window._cfConfig) {
+            renderCart(cart, window._cfConfig);
+            openCart();
+          } else {
+            _pendingOpen = true;
+          }
         }
-      } catch (e2) {}
-    }
-  }
-  return result;
-};
-
-document.addEventListener('submit', async (e) => {
-  const form = e.target;
-  const isCart =
-    form.action?.includes('/cart/add') ||
-    form.querySelector('[name="add"]');
-  if (!isCart) return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
-  
-  const fd = new FormData(form);
-  
-  // Mostrar loading no botão
-  const btn = form.querySelector('[type="submit"], [name="add"]');
-  if (btn) {
-    btn.disabled = true;
-    btn.dataset.originalText = btn.textContent;
-    btn.textContent = 'Adding...';
-  }
-
-  try {
-    const res = await fetch('/cart/add.js', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: fd.get('id'),
-        quantity: parseInt(fd.get('quantity') || '1')
-      })
-    });
-
-    if (res.ok) {
-      // Pequeno delay para garantir que Shopify processou
-      await new Promise(r => setTimeout(r, 100));
-      const cart = await fetchShopifyCart();
-      if (window._cfConfig) {
-        renderCart(cart, window._cfConfig);
-        openCart();
+      } catch (e) {
+        console.warn('[CartFlow] Add error:', e);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = btn.dataset.orig || 'Add to cart';
+        }
       }
-    }
-  } catch (e) {
-    console.warn('[CartFlow] Erro ao adicionar:', e);
-  } finally {
-    // Restaurar botão
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = btn.dataset.originalText || 'Add to cart';
-    }
-  }
-}, true);
+    }, true);
 
+    // Intercepta cliques
     document.addEventListener('click', async (e) => {
       const t = e.target;
 
+      // Fechar
       if (t.id === 'cf-close' || t.id === 'cf-overlay') {
         closeCart();
         return;
       }
 
+      // Checkout — proteção contra duplo clique
       if (t.id === 'cf-checkout') {
         e.preventDefault();
-        const cart = await fetchShopifyCart();
-        const url = await buildCheckoutUrl(cart.items, window._cfConfig);
-        trackEvent('checkout', cart.total_price / 100);
-        window.location.href = url || '/checkout';
+        if (t.disabled) return;
+        t.disabled = true;
+        t.textContent = 'Redirecting...';
+        try {
+          const cart = await fetchShopifyCart();
+          const url = await buildCheckoutUrl(cart.items, window._cfConfig);
+          trackEvent('checkout', cart.total_price / 100);
+          window.location.href = url || '/checkout';
+        } catch (e) {
+          t.disabled = false;
+          t.textContent = 'SECURE CHECKOUT';
+        }
         return;
       }
 
+      // Ícone de carrinho do tema
       const triggers = [
-        '[href="/cart"]',
-        '.cart-icon-bubble',
-        '[data-cart-toggle]',
-        '.header__icon--cart',
-        '[aria-label="Cart"]',
-        '[aria-label="Open cart"]',
-        '.cart-count-bubble',
-        '#cart-icon-bubble',
+        '[href="/cart"]', '.cart-icon-bubble',
+        '[data-cart-toggle]', '.header__icon--cart',
+        '[aria-label="Cart"]', '[aria-label="Open cart"]',
+        '.cart-count-bubble', '#cart-icon-bubble',
       ];
-      const isCartIcon = triggers.some(sel =>
-        t.matches?.(sel) || t.closest?.(sel)
-      );
-      if (isCartIcon) {
+      if (triggers.some(sel => t.matches?.(sel) || t.closest?.(sel))) {
         e.preventDefault();
         e.stopPropagation();
         const cart = await fetchShopifyCart();
@@ -667,6 +672,9 @@ document.addEventListener('submit', async (e) => {
     }, true);
   }
 
+  // ============================================
+  // INIT
+  // ============================================
   try {
     const config = await getConfig();
     if (!config) {
@@ -676,21 +684,23 @@ document.addEventListener('submit', async (e) => {
 
     window._cfConfig = config;
 
+    injectStyles(config.visual || {});
+    injectHTML(config.visual || {});
+    interceptCart();
+    onCartReady(); // ← libera fila de eventos
+
     // Pré-carregar SKU map em background
     const domain = config.routing?.active_store?.domain;
     if (domain) {
       getSkuMap(domain).then(map => {
-        console.log(`[CartFlow] SKU map pré-carregado: ${Object.keys(map).length} variantes`);
+        console.log(`[CartFlow] SKU map ready: ${Object.keys(map).length} variants`);
       });
     }
 
-    injectStyles(config.visual || {});
-    injectHTML(config.visual || {});
-    interceptCart();
     trackEvent('cart_impression');
+    console.log('[CartFlow] ✓ Loaded');
+    console.log('[CartFlow] Store:', config.routing?.active_store?.name || 'none');
 
-    console.log('[CartFlow] ✓ Loaded successfully');
-    console.log('[CartFlow] Active store:', config.routing?.active_store?.name || 'none');
   } catch (err) {
     console.error('[CartFlow] Init error:', err);
   }
