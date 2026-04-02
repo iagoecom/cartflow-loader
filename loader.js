@@ -366,7 +366,6 @@ drawer-component[id*="cart"],
                 <div class="cf-name">${item.title}</div>
                 <div class="cf-variant">
                   ${item.variant_title && item.variant_title !== 'Default Title' ? item.variant_title : ''}
-```
                 </div>
                 <div>
                   ${orig && v.show_strikethrough ? `<span class="cf-compare">${orig}</span>` : ''}
