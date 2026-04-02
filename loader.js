@@ -5,6 +5,7 @@
   const API_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/config';
   const TRACK_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/track-event';
   const CACHE_KEY = 'cartflow_config';
+  const SKU_CACHE_KEY = 'cartflow_sku_cache';
   const CACHE_TTL = 30 * 60 * 1000;
 
   if (!TOKEN) {
@@ -12,9 +13,6 @@
     return;
   }
 
-  // ============================================
-  // CURRENCY — multi-currency support
-  // ============================================
   function formatPrice(cents) {
     const amount = cents / 100;
     const currency = window.Shopify?.currency?.active || 'USD';
@@ -28,9 +26,6 @@
     }
   }
 
-  // ============================================
-  // CACHE
-  // ============================================
   async function getConfig() {
     try {
       const cached = localStorage.getItem(CACHE_KEY);
@@ -54,9 +49,6 @@
     return data;
   }
 
-  // ============================================
-  // ANALYTICS
-  // ============================================
   async function trackEvent(eventType, amount = 0, metadata = {}) {
     try {
       await fetch(TRACK_URL, {
@@ -72,12 +64,65 @@
     } catch (e) {}
   }
 
-  // ============================================
-  // SHOPIFY CART API
-  // ============================================
   async function fetchShopifyCart() {
     const res = await fetch('/cart.js');
     return await res.json();
+  }
+
+  // ============================================
+  // SKU → VARIANT_ID (com cache 30min por loja)
+  // ============================================
+  async function getSkuMap(domain) {
+    const cacheKey = `${SKU_CACHE_KEY}_${domain}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const { data, expiresAt } = JSON.parse(cached);
+        if (Date.now() < expiresAt) return data;
+      }
+    } catch (e) {}
+
+    // Buscar todos os produtos da loja white
+    const skuMap = {};
+    let url = `https://${domain}/products.json?limit=250`;
+
+    try {
+      while (url) {
+        const res = await fetch(url);
+        if (!res.ok) break;
+        const data = await res.json();
+
+        for (const product of data.products) {
+          for (const variant of product.variants) {
+            if (variant.sku) {
+              skuMap[variant.sku] = variant.id;
+            }
+          }
+        }
+
+        // Paginação
+        const linkHeader = res.headers.get('Link');
+        if (linkHeader && linkHeader.includes('rel="next"')) {
+          const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+          url = match ? match[1] : null;
+        } else {
+          url = null;
+        }
+      }
+    } catch (e) {
+      console.warn('[CartFlow] Erro ao buscar SKU map:', e);
+    }
+
+    // Salvar cache
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify({
+        data: skuMap,
+        expiresAt: Date.now() + CACHE_TTL
+      }));
+    } catch (e) {}
+
+    console.log(`[CartFlow] SKU map carregado: ${Object.keys(skuMap).length} variantes`);
+    return skuMap;
   }
 
   // ============================================
@@ -236,23 +281,17 @@
       #cf-badges.show { display:block; }
       #cf-badges img { max-width:100%;height:auto; }
 
-/* Hide native Shopify cart drawer */
-cart-drawer,
-cart-notification,
-.cart-drawer,
-.cart-notification,
-#cart-drawer,
-#CartDrawer,
-#cart-notification,
-[id*="cart-drawer"],
-[class*="cart-drawer"],
-drawer-component[id*="cart"],
-.shopify-section-cart-drawer {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
+      /* Hide native Shopify cart drawer */
+      cart-drawer,cart-notification,.cart-drawer,
+      .cart-notification,#cart-drawer,#CartDrawer,
+      #cart-notification,[id*="cart-drawer"],
+      [class*="cart-drawer"],drawer-component[id*="cart"],
+      .shopify-section-cart-drawer {
+        display:none !important;
+        visibility:hidden !important;
+        opacity:0 !important;
+        pointer-events:none !important;
+      }
 
       @media (max-width: 480px) {
         #cf-drawer { width:100vw; }
@@ -261,9 +300,6 @@ drawer-component[id*="cart"],
     document.head.appendChild(style);
   }
 
-  // ============================================
-  // HTML
-  // ============================================
   function injectHTML(v) {
     const overlay = document.createElement('div');
     overlay.id = 'cf-overlay';
@@ -300,9 +336,6 @@ drawer-component[id*="cart"],
     document.body.appendChild(overlay);
   }
 
-  // ============================================
-  // OPEN / CLOSE
-  // ============================================
   function openCart() {
     document.getElementById('cf-overlay')?.classList.add('open');
     document.getElementById('cf-drawer')?.classList.add('open');
@@ -315,29 +348,23 @@ drawer-component[id*="cart"],
     document.body.style.overflow = '';
   }
 
-  // ============================================
-  // RENDER
-  // ============================================
   function renderCart(cart, config) {
     const v = config.visual || {};
     const items = cart.items || [];
     const count = items.reduce((a, i) => a + i.quantity, 0);
 
-    // Title
     const titleEl = document.getElementById('cf-title');
     if (titleEl) {
       titleEl.textContent = (v.header_title_text || 'Cart • {{cart_quantity}}')
         .replace('{{cart_quantity}}', count);
     }
 
-    // Announcement
     const annEl = document.getElementById('cf-announcement');
     if (annEl && v.announcement_enabled && v.announcement_text) {
       annEl.innerHTML = v.announcement_text;
       annEl.classList.add('show');
     }
 
-    // Items
     const itemsEl = document.getElementById('cf-items');
     if (itemsEl) {
       if (items.length === 0) {
@@ -385,7 +412,6 @@ drawer-component[id*="cart"],
       }
     }
 
-    // Rewards
     const rewards = config.rewards || [];
     if (rewards.length > 0 && v.rewards_enabled) {
       const rwEl = document.getElementById('cf-rewards');
@@ -406,8 +432,7 @@ drawer-component[id*="cart"],
         if (textEl) {
           if (next) {
             const rem = (next.minimum_value - value).toFixed(0);
-            textEl.textContent = (next.title_before || '')
-              .replace('{remaining}', rem);
+            textEl.textContent = (next.title_before || '').replace('{remaining}', rem);
           } else {
             textEl.textContent = v.rewards_complete_text || 'All benefits unlocked! 🎉';
           }
@@ -421,7 +446,6 @@ drawer-component[id*="cart"],
       }
     }
 
-    // Upsells
     const upsells = config.upsells || [];
     if (upsells.length > 0 && v.upsells_enabled) {
       const upEl = document.getElementById('cf-upsells');
@@ -452,11 +476,9 @@ drawer-component[id*="cart"],
       }
     }
 
-    // Subtotal
     const subEl = document.getElementById('cf-subtotal');
     if (subEl) subEl.textContent = formatPrice(cart.total_price);
 
-    // Savings
     const totalOrig = items.reduce((a, i) =>
       a + (i.original_price || i.price) * i.quantity, 0);
     const totalSaved = totalOrig - cart.total_price;
@@ -467,7 +489,6 @@ drawer-component[id*="cart"],
       if (savVal) savVal.textContent = `−${formatPrice(totalSaved)}`;
     }
 
-    // Trust badges
     if (v.trust_badges_enabled && v.trust_badges_image_url) {
       const bdEl = document.getElementById('cf-badges');
       if (bdEl) {
@@ -478,19 +499,28 @@ drawer-component[id*="cart"],
   }
 
   // ============================================
-  // ROUTED CHECKOUT
+  // ROUTED CHECKOUT — busca variant_id pelo SKU
   // ============================================
-  function buildCheckoutUrl(items, config) {
-    const routing = config.routing;
-    if (!routing?.active_store?.domain || !routing?.sku_map) return null;
+  async function buildCheckoutUrl(cartItems, config) {
+    const domain = config.routing?.active_store?.domain;
+    if (!domain) return null;
 
-    const domain = routing.active_store.domain;
-    const skuMap = routing.sku_map;
+    // Buscar SKU map da loja white (com cache)
+    const skuMap = await getSkuMap(domain);
+    if (!skuMap || Object.keys(skuMap).length === 0) {
+      console.warn('[CartFlow] SKU map vazio para:', domain);
+      return null;
+    }
 
-    const lineItems = items
+    const lineItems = cartItems
       .map(item => {
-        const variantId = skuMap[item.sku];
-        if (!variantId) return null;
+        const sku = item.sku;
+        if (!sku) return null;
+        const variantId = skuMap[sku];
+        if (!variantId) {
+          console.warn(`[CartFlow] SKU não encontrado: ${sku}`);
+          return null;
+        }
         return `${variantId}:${item.quantity}`;
       })
       .filter(Boolean);
@@ -499,9 +529,6 @@ drawer-component[id*="cart"],
     return `https://${domain}/cart/${lineItems.join(',')}`;
   }
 
-  // ============================================
-  // GLOBAL FUNCTIONS
-  // ============================================
   window.cfQty = async (key, qty) => {
     if (qty < 0) return;
     await fetch('/cart/change.js', {
@@ -526,11 +553,7 @@ drawer-component[id*="cart"],
     }
   };
 
-  // ============================================
-  // INTERCEPT NATIVE CART
-  // ============================================
   function interceptCart() {
-    // Intercept fetch
     const origFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0] || '');
@@ -547,7 +570,6 @@ drawer-component[id*="cart"],
       return result;
     };
 
-    // Intercept form submit
     document.addEventListener('submit', async (e) => {
       const form = e.target;
       const isCart =
@@ -566,27 +588,23 @@ drawer-component[id*="cart"],
       });
     }, true);
 
-    // Intercept clicks
     document.addEventListener('click', async (e) => {
       const t = e.target;
 
-      // Close
       if (t.id === 'cf-close' || t.id === 'cf-overlay') {
         closeCart();
         return;
       }
 
-      // Checkout
       if (t.id === 'cf-checkout') {
         e.preventDefault();
         const cart = await fetchShopifyCart();
-        const url = buildCheckoutUrl(cart.items, window._cfConfig);
+        const url = await buildCheckoutUrl(cart.items, window._cfConfig);
         trackEvent('checkout', cart.total_price / 100);
         window.location.href = url || '/checkout';
         return;
       }
 
-      // Cart icon triggers
       const triggers = [
         '[href="/cart"]',
         '.cart-icon-bubble',
@@ -610,9 +628,6 @@ drawer-component[id*="cart"],
     }, true);
   }
 
-  // ============================================
-  // INIT
-  // ============================================
   try {
     const config = await getConfig();
     if (!config) {
@@ -621,6 +636,15 @@ drawer-component[id*="cart"],
     }
 
     window._cfConfig = config;
+
+    // Pré-carregar SKU map em background
+    const domain = config.routing?.active_store?.domain;
+    if (domain) {
+      getSkuMap(domain).then(map => {
+        console.log(`[CartFlow] SKU map pré-carregado: ${Object.keys(map).length} variantes`);
+      });
+    }
+
     injectStyles(config.visual || {});
     injectHTML(config.visual || {});
     interceptCart();
