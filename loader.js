@@ -4,9 +4,8 @@
   const TOKEN = SCRIPT_TAG?.getAttribute('data-token');
   const API_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/config';
   const TRACK_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/track-event';
-  const CACHE_KEY = 'cartflow_config';
-  const SKU_CACHE_KEY = 'cartflow_sku_cache';
-  const CONFIG_TTL = 5 * 60 * 1000;
+const CACHE_KEY = 'cartflow_config';
+const SKU_CACHE_KEY = 'cartflow_sku_cache';
 const SKU_TTL = 30 * 60 * 1000;
 
   if (!TOKEN) {
@@ -27,28 +26,20 @@ const SKU_TTL = 30 * 60 * 1000;
     }
   }
 
-  async function getConfig() {
-    try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) {
-        const { data, expiresAt } = JSON.parse(cached);
-        if (Date.now() < expiresAt) return data;
-      }
-    } catch (e) {}
-
+async function getConfig() {
+  try {
     const res = await fetch(`${API_URL}?token=${TOKEN}`);
     if (!res.ok) return null;
-
-    const data = await res.json();
+    return await res.json();
+  } catch (e) {
+    // Fallback para cache se Supabase cair
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({
-        data,
-        expiresAt: Date.now() + CONFIG_TTL
-      }));
-    } catch (e) {}
-
-    return data;
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) return JSON.parse(cached).data;
+    } catch (e2) {}
+    return null;
   }
+}
 
   async function trackEvent(eventType, amount = 0, metadata = {}) {
     try {
