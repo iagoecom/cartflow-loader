@@ -548,19 +548,35 @@ async function getConfig() {
   function interceptCart() {
     const origFetch = window.fetch;
     window.fetch = async (...args) => {
-      const url = String(args[0] || '');
-      const result = await origFetch.apply(window, args);
-      if (url.includes('/cart/add') && !url.includes('track-event')) {
-        try {
-          const cart = await fetchShopifyCart();
-          if (window._cfConfig) {
-            renderCart(cart, window._cfConfig);
-            openCart();
-          }
-        } catch (e) {}
+  const url = String(args[0] || '');
+  const result = await origFetch.apply(window, args);
+  if (url.includes('/cart/add') && !url.includes('track-event')) {
+    try {
+      // Verificar se o add foi bem sucedido
+      const addResult = result.clone();
+      const addData = await addResult.json();
+      
+      // Só abre se adicionou com sucesso
+      if (addData && (addData.id || addData.items)) {
+        const cart = await fetchShopifyCart();
+        if (window._cfConfig) {
+          renderCart(cart, window._cfConfig);
+          openCart();
+        }
       }
-      return result;
-    };
+    } catch (e) {
+      // Fallback — tenta abrir mesmo assim
+      try {
+        const cart = await fetchShopifyCart();
+        if (window._cfConfig) {
+          renderCart(cart, window._cfConfig);
+          openCart();
+        }
+      } catch (e2) {}
+    }
+  }
+  return result;
+};
 
     document.addEventListener('submit', async (e) => {
       const form = e.target;
