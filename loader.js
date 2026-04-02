@@ -578,23 +578,69 @@ async function getConfig() {
   return result;
 };
 
-    document.addEventListener('submit', async (e) => {
-      const form = e.target;
-      const isCart =
-        form.action?.includes('/cart/add') ||
-        form.querySelector('[name="add"]');
-      if (!isCart) return;
-      e.preventDefault();
-      const fd = new FormData(form);
-      await fetch('/cart/add.js', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: fd.get('id'),
-          quantity: parseInt(fd.get('quantity') || '1')
-        })
-      });
-    }, true);
+document.addEventListener('submit', async (e) => {
+  const form = e.target;
+  const isCart =
+    form.action?.includes('/cart/add') ||
+    form.querySelector('[name="add"]');
+  if (!isCart) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  
+  const fd = new FormData(form);
+  
+  // Mostrar loading no botão
+  const btn = form.querySelector('[type="submit"], [name="add"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.originalText = btn.textContent;
+    btn.textContent = 'Adding...';
+  }
+
+  try {
+    const res = await fetch('/cart/add.js', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: fd.get('id'),
+        quantity: parseInt(fd.get('quantity') || '1')
+      })
+    });
+
+    if (res.ok) {
+      // Pequeno delay para garantir que Shopify processou
+      await new Promise(r => setTimeout(r, 100));
+      const cart = await fetchShopifyCart();
+      if (window._cfConfig) {
+        renderCart(cart, window._cfConfig);
+        openCart();
+      }
+    }
+  } catch (e) {
+    console.warn('[CartFlow] Erro ao adicionar:', e);
+  } finally {
+    // Restaurar botão
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.originalText || 'Add to cart';
+    }
+  }
+}, true);
+```
+
+---
+
+### O que muda
+```
+ANTES:
+Tema e CartFlow brigam pelo submit
+→ Um cancela o outro ❌
+
+DEPOIS:
+stopImmediatePropagation() → CartFlow
+assume completamente o submit
+→ Aguarda 100ms para garantir
+→ Abre o carrinho ✅
 
     document.addEventListener('click', async (e) => {
       const t = e.target;
