@@ -6,7 +6,8 @@
   const TRACK_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/track-event';
   const CACHE_KEY = 'cartflow_config';
   const SKU_CACHE_KEY = 'cartflow_sku_cache';
-  const CACHE_TTL = 30 * 60 * 1000;
+  const CONFIG_TTL = 5 * 60 * 1000;
+const SKU_TTL = 30 * 60 * 1000;
 
   if (!TOKEN) {
     console.warn('[CartFlow] data-token not found');
@@ -42,7 +43,7 @@
     try {
       localStorage.setItem(CACHE_KEY, JSON.stringify({
         data,
-        expiresAt: Date.now() + CACHE_TTL
+        expiresAt: Date.now() + CONFIG_TTL
       }));
     } catch (e) {}
 
@@ -117,7 +118,7 @@
     try {
       localStorage.setItem(cacheKey, JSON.stringify({
         data: skuMap,
-        expiresAt: Date.now() + CACHE_TTL
+        expiresAt: Date.now() + SKU_TTL
       }));
     } catch (e) {}
 
