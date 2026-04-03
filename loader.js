@@ -4,8 +4,6 @@
   const TOKEN = SCRIPT_TAG?.getAttribute('data-token');
   const API_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/config';
   const TRACK_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/track-event';
-  const SKU_CACHE_KEY = 'cartflow_sku_cache';
-  const SKU_TTL = 30 * 60 * 1000;
 
   if (!TOKEN) {
     console.warn('[CartFlow] data-token not found');
@@ -13,7 +11,7 @@
   }
 
   // ============================================
-  // FILA DE EVENTOS — clique antes de carregar
+  // FILA DE EVENTOS
   // ============================================
   let _cartReady = false;
   let _pendingOpen = false;
@@ -34,21 +32,33 @@
   // ============================================
   // CURRENCY
   // ============================================
-  function formatPrice(cents) {
+  function formatPrice(cents, currency) {
     const amount = cents / 100;
-    const currency = window.Shopify?.currency?.active || 'USD';
+    const cur = currency || window.Shopify?.currency?.active || 'USD';
     try {
       return new Intl.NumberFormat('en-US', {
         style: 'currency',
-        currency: currency,
+        currency: cur,
       }).format(amount);
     } catch (e) {
-      return `${currency} ${amount.toFixed(2)}`;
+      return `${cur} ${amount.toFixed(2)}`;
+    }
+  }
+
+  function formatPriceDirect(amount, currency) {
+    const cur = currency || window.Shopify?.currency?.active || 'USD';
+    try {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: cur,
+      }).format(amount);
+    } catch (e) {
+      return `${cur} ${amount.toFixed(2)}`;
     }
   }
 
   // ============================================
-  // CONFIG — sem cache, sempre atualizado
+  // CONFIG
   // ============================================
   async function getConfig() {
     try {
@@ -61,18 +71,13 @@
   }
 
   // ============================================
-  // ANALYTICS — não bloqueia
+  // ANALYTICS
   // ============================================
   function trackEvent(eventType, amount = 0, metadata = {}) {
     fetch(TRACK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: TOKEN,
-        event_type: eventType,
-        amount,
-        metadata
-      })
+      body: JSON.stringify({ token: TOKEN, event_type: eventType, amount, metadata })
     }).catch(() => {});
   }
 
@@ -85,62 +90,12 @@
   }
 
   // ============================================
-  // SKU MAP — cache 30min por loja
-  // ============================================
-  async function getSkuMap(domain) {
-    const cacheKey = `${SKU_CACHE_KEY}_${domain}`;
-    try {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const { data, expiresAt } = JSON.parse(cached);
-        if (Date.now() < expiresAt) return data;
-      }
-    } catch (e) {}
-
-    const skuMap = {};
-    let url = `https://${domain}/products.json?limit=250`;
-
-    try {
-      while (url) {
-        const res = await fetch(url);
-        if (!res.ok) break;
-        const data = await res.json();
-
-        for (const product of data.products) {
-          for (const variant of product.variants) {
-            if (variant.sku) {
-              skuMap[variant.sku] = variant.id;
-            }
-          }
-        }
-
-        const linkHeader = res.headers.get('Link');
-        if (linkHeader?.includes('rel="next"')) {
-          const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-          url = match ? match[1] : null;
-        } else {
-          url = null;
-        }
-      }
-    } catch (e) {
-      console.warn('[CartFlow] SKU map error:', e);
-    }
-
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify({
-        data: skuMap,
-        expiresAt: Date.now() + SKU_TTL
-      }));
-    } catch (e) {}
-
-    console.log(`[CartFlow] SKU map: ${Object.keys(skuMap).length} variants`);
-    return skuMap;
-  }
-
-  // ============================================
   // STYLES
   // ============================================
   function injectStyles(v) {
+    const drawerWidth = v.cart_width_desktop === 'wide' ? '480px' : 
+                        v.cart_width_desktop === 'narrow' ? '360px' : '420px';
+
     const style = document.createElement('style');
     style.id = 'cartflow-styles';
     style.textContent = `
@@ -149,9 +104,10 @@
         background:rgba(0,0,0,0.5);z-index:999998;
       }
       #cf-overlay.open { display:block; }
+
       #cf-drawer {
-        position:fixed;top:0;right:-440px;
-        width:420px;max-width:100vw;height:100%;
+        position:fixed;top:0;right:-${parseInt(drawerWidth)+20}px;
+        width:${drawerWidth};max-width:100vw;height:100%;
         background:${v.bg_color || '#FFFFFF'};
         color:${v.text_color || '#000000'};
         z-index:999999;transition:right 0.3s ease;
@@ -160,41 +116,73 @@
         font-family:${v.inherit_fonts ? 'inherit' : 'system-ui,sans-serif'};
       }
       #cf-drawer.open { right:0; }
+
       #cf-header {
-        padding:${v.header_height === 'tall' ? '20px' : '14px'} 16px;
-        border-bottom:${v.header_border === 'thin' ? '1px solid #e5e7eb' : 'none'};
+        padding:${v.header_height === 'tall' ? '20px' : v.header_height === 'slim' ? '10px' : '14px'} 16px;
+        border-bottom:${v.header_border !== 'none' ? `${v.header_border_thickness === 'thick' ? '2px' : '1px'} solid ${v.header_border_color || '#e5e7eb'}` : 'none'};
         background:${v.header_bg_color || '#FFFFFF'};
         display:flex;align-items:center;
-        justify-content:space-between;flex-shrink:0;
+        justify-content:${v.header_alignment === 'center' ? 'center' : 'space-between'};
+        flex-shrink:0;position:relative;
       }
-      #cf-title { font-size:16px;font-weight:600; }
+
+      #cf-header-logo {
+        max-height:${v.header_logo_size || 100}%;
+        max-width:120px;object-fit:contain;
+      }
+
+      #cf-title {
+        font-size:${v.header_font_size || 16}px;
+        font-weight:${v.header_font_weight === 'bold' ? '700' : v.header_font_weight === 'semibold' ? '600' : '400'};
+        color:${v.header_text_color_override || v.text_color || '#000'};
+      }
+
       #cf-close {
-        background:none;border:none;font-size:20px;
-        cursor:pointer;color:${v.text_color || '#000'};
-        padding:4px;line-height:1;
+        background:${v.close_bg_color || 'transparent'};
+        border:none;
+        font-size:${v.close_icon_size === 'large' ? '24px' : v.close_icon_size === 'small' ? '16px' : '20px'};
+        cursor:pointer;
+        color:${v.close_icon_color || '#000'};
+        padding:6px;line-height:1;
+        border-radius:4px;
+        position:${v.header_alignment === 'center' ? 'absolute' : 'static'};
+        ${v.close_button_position === 'left' ? 'left:12px;' : 'right:12px;'}
       }
+      #cf-close:hover {
+        background:${v.close_bg_hover_color || '#f3f4f6'};
+        color:${v.close_icon_hover_color || '#666'};
+      }
+
       #cf-announcement {
         padding:${v.announcement_height === 'slim' ? '6px' : v.announcement_height === 'thick' ? '14px' : '10px'} 16px;
         background:${v.announcement_bg_color || '#f2f2f2'};
         border-bottom:1px solid ${v.announcement_border_color || '#efefef'};
-        font-size:13px;text-align:center;
+        font-size:${v.announcement_font_size || 13}px;
+        color:${v.announcement_text_color || '#333'};
+        text-align:${v.announcement_alignment || 'center'};
         display:none;flex-shrink:0;
       }
       #cf-announcement.show { display:block; }
+
       #cf-rewards {
         padding:10px 16px;
         border-bottom:1px solid #e5e7eb;
         flex-shrink:0;display:none;
       }
       #cf-rewards.show { display:block; }
-      .cf-rw-text { font-size:12px;text-align:center;margin-bottom:6px; }
+      .cf-rw-text {
+        font-size:${v.rewards_font_size || 12}px;
+        text-align:center;margin-bottom:6px;
+      }
       .cf-rw-bg {
-        height:5px;border-radius:3px;
+        height:${v.rewards_bar_height || 5}px;
+        border-radius:3px;
         background:${v.rewards_bar_bg_color || '#efefef'};
         margin-bottom:5px;
       }
       .cf-rw-fill {
-        height:5px;border-radius:3px;
+        height:${v.rewards_bar_height || 5}px;
+        border-radius:3px;
         background:${v.rewards_bar_fg_color || '#000'};
         transition:width 0.4s ease;
       }
@@ -202,9 +190,11 @@
         display:flex;justify-content:space-between;
         font-size:10px;color:#999;
       }
+
       #cf-items { flex:1;overflow-y:auto;padding:12px 16px; }
       .cf-empty { text-align:center;padding:48px 16px;color:#999; }
       .cf-empty-icon { font-size:40px;margin-bottom:12px; }
+
       .cf-item {
         display:flex;gap:12px;padding-bottom:12px;
         margin-bottom:12px;border-bottom:1px solid #f0f0f0;
@@ -231,6 +221,7 @@
         justify-content:center;
       }
       .cf-qty-n { font-size:13px;min-width:20px;text-align:center; }
+
       #cf-upsells {
         padding:10px 16px;border-top:1px solid #f0f0f0;
         flex-shrink:0;display:none;
@@ -251,6 +242,10 @@
       }
       .cf-up-name { font-size:12px;font-weight:500;flex:1; }
       .cf-up-price { font-size:11px;color:#666;margin-top:2px; }
+      .cf-up-compare {
+        font-size:11px;color:#999;
+        text-decoration:line-through;margin-right:4px;
+      }
       .cf-up-btn {
         padding:5px 12px;
         background:${v.button_color || '#000000'};
@@ -258,13 +253,24 @@
         border:none;border-radius:${v.button_radius || 0}px;
         font-size:11px;font-weight:600;cursor:pointer;flex-shrink:0;
       }
+      .cf-up-btn:hover { background:${v.button_hover_color || '#333'}; }
+
+      #cf-continue {
+        display:${v.show_continue_shopping ? 'block' : 'none'};
+        text-align:center;margin-top:8px;
+        font-size:12px;color:#666;
+        text-decoration:underline;cursor:pointer;
+        background:none;border:none;width:100%;
+      }
+
       #cf-footer {
         padding:14px 16px;
         border-top:1px solid #e5e7eb;flex-shrink:0;
       }
       .cf-row {
         display:flex;justify-content:space-between;
-        font-size:13px;margin-bottom:4px;color:#666;
+        font-size:13px;margin-bottom:4px;
+        color:${v.subtotal_text_color || '#666'};
       }
       .cf-savings-row {
         display:flex;justify-content:space-between;
@@ -279,11 +285,13 @@
         font-size:14px;font-weight:700;cursor:pointer;
         letter-spacing:.04em;margin-top:4px;
       }
-      #cf-checkout:hover { opacity:.88; }
+      #cf-checkout:hover { background:${v.button_hover_color || '#333'}; }
       #cf-checkout:disabled { opacity:.6;cursor:not-allowed; }
+
       #cf-badges { margin-top:10px;text-align:center;display:none; }
       #cf-badges.show { display:block; }
       #cf-badges img { max-width:100%;height:auto; }
+
       /* Hide native Shopify cart drawer */
       cart-drawer,cart-notification,.cart-drawer,
       .cart-notification,#cart-drawer,#CartDrawer,
@@ -295,8 +303,11 @@
         opacity:0 !important;
         pointer-events:none !important;
       }
+
       @media (max-width: 480px) {
-        #cf-drawer { width:100vw; }
+        #cf-drawer { 
+          width:${v.cart_width_mobile === 'full' ? '100vw' : '90vw'} !important;
+        }
       }
     `;
     document.head.appendChild(style);
@@ -308,11 +319,17 @@
   function injectHTML(v) {
     const overlay = document.createElement('div');
     overlay.id = 'cf-overlay';
+
+    const headerContent = v.header_logo_url
+      ? `<img id="cf-header-logo" src="${v.header_logo_url}" alt="Logo"/>`
+      : `<span id="cf-title">${(v.header_title_text || 'Cart • {{cart_quantity}}').replace('{{cart_quantity}}', '0')}</span>`;
+
+    const closeBtn = `<button id="cf-close" aria-label="Close cart">✕</button>`;
+
     overlay.innerHTML = `
       <div id="cf-drawer">
         <div id="cf-header">
-          <span id="cf-title">Cart • 0</span>
-          <button id="cf-close" aria-label="Close cart">✕</button>
+          ${v.close_button_position === 'left' ? closeBtn + headerContent : headerContent + closeBtn}
         </div>
         <div id="cf-announcement"></div>
         <div id="cf-rewards">
@@ -334,6 +351,7 @@
             <span id="cf-savings-val"></span>
           </div>
           <button id="cf-checkout">SECURE CHECKOUT</button>
+          <button id="cf-continue" onclick="closeCart()">Continue shopping</button>
           <div id="cf-badges"></div>
         </div>
       </div>
@@ -356,6 +374,8 @@
     document.body.style.overflow = '';
   }
 
+  window.closeCart = closeCart;
+
   // ============================================
   // RENDER
   // ============================================
@@ -364,18 +384,28 @@
     const items = cart.items || [];
     const count = items.reduce((a, i) => a + i.quantity, 0);
 
+    // Title
     const titleEl = document.getElementById('cf-title');
     if (titleEl) {
       titleEl.textContent = (v.header_title_text || 'Cart • {{cart_quantity}}')
         .replace('{{cart_quantity}}', count);
     }
 
+    // Announcement
     const annEl = document.getElementById('cf-announcement');
-    if (annEl && v.announcement_enabled && v.announcement_text) {
-      annEl.innerHTML = v.announcement_text;
-      annEl.classList.add('show');
+    if (annEl) {
+      if (v.announcement_enabled && v.announcement_text) {
+        annEl.innerHTML = v.announcement_text;
+        annEl.style.color = v.announcement_text_color || '#333';
+        annEl.style.textAlign = v.announcement_alignment || 'center';
+        annEl.style.fontSize = (v.announcement_font_size || 13) + 'px';
+        annEl.classList.add('show');
+      } else {
+        annEl.classList.remove('show');
+      }
     }
 
+    // Items
     const itemsEl = document.getElementById('cf-items');
     if (itemsEl) {
       if (items.length === 0) {
@@ -424,7 +454,8 @@
 
     // Rewards
     const rewards = config.rewards || [];
-    if (rewards.length > 0 && v.rewards_enabled) {
+    const showRewardsEmpty = v.rewards_show_on_empty !== false;
+    if (rewards.length > 0 && v.rewards_enabled && (items.length > 0 || showRewardsEmpty)) {
       const rwEl = document.getElementById('cf-rewards');
       if (rwEl) {
         rwEl.classList.add('show');
@@ -434,19 +465,32 @@
         const last = rewards[rewards.length - 1];
         const next = rewards.find(t => t.minimum_value > value);
         const pct = Math.min((value / last.minimum_value) * 100, 100);
+
         const textEl = rwEl.querySelector('.cf-rw-text');
         const fillEl = rwEl.querySelector('.cf-rw-fill');
         const tiersEl = rwEl.querySelector('.cf-rw-tiers');
+
         if (textEl) {
-          textEl.textContent = next
-            ? (next.title_before || '').replace('{remaining}', (next.minimum_value - value).toFixed(0))
-            : (v.rewards_complete_text || 'All benefits unlocked! 🎉');
+          if (next) {
+            const rem = (next.minimum_value - value).toFixed(0);
+            const titleBefore = next.title_before || '';
+            textEl.innerHTML = titleBefore
+              .replace('{remaining}', rem)
+              .replace('{{remaining}}', rem)
+              .replace('{{count}}', rem)
+              .replace('{count}', rem);
+          } else {
+            textEl.innerHTML = v.rewards_complete_text || 'All benefits unlocked! 🎉';
+          }
         }
         if (fillEl) fillEl.style.width = `${pct}%`;
         if (tiersEl) {
-          tiersEl.innerHTML = rewards.map(t =>
-            `<span>${t.icon || ''} ${t.reward_description}</span>`
-          ).join('');
+          tiersEl.innerHTML = rewards.map(t => {
+            const unlocked = value >= t.minimum_value;
+            return `<span style="color:${unlocked ? v.rewards_bar_fg_color || '#000' : '#999'}">
+              ${t.icon || ''} ${t.reward_description}
+            </span>`;
+          }).join('');
         }
       }
     }
@@ -454,26 +498,39 @@
     // Upsells
     const upsells = config.upsells || [];
     if (upsells.length > 0 && v.upsells_enabled) {
-      const upEl = document.getElementById('cf-upsells');
-      if (upEl) {
-        upEl.classList.add('show');
-        upEl.innerHTML = `
-          <div class="cf-up-title">${v.upsells_title || 'RECOMMENDED FOR YOU'}</div>
-          ${upsells.map(p => `
-            <div class="cf-up-item">
-              <img class="cf-up-img" src="${p.image_url || ''}" alt="${p.title}"
-                onerror="this.style.display='none'"/>
-              <div>
-                <div class="cf-up-name">${p.title}</div>
-                <div class="cf-up-price">${formatPrice(p.price * 100)}</div>
+      const cartSkus = items.map(i => i.sku);
+      const visibleUpsells = upsells.filter(p => {
+        if (v.upsells_show_if_in_cart) return true;
+        return !cartSkus.includes(p.sku);
+      });
+
+      if (visibleUpsells.length > 0) {
+        const upEl = document.getElementById('cf-upsells');
+        if (upEl) {
+          upEl.classList.add('show');
+          upEl.innerHTML = `
+            <div class="cf-up-title">${v.upsells_title || 'RECOMMENDED FOR YOU'}</div>
+            ${visibleUpsells.map(p => `
+              <div class="cf-up-item">
+                <img class="cf-up-img" src="${p.image_url || ''}" alt="${p.title}"
+                  onerror="this.style.display='none'"/>
+                <div style="flex:1">
+                  <div class="cf-up-name">${p.title}</div>
+                  <div>
+                    ${p.compare_price && v.upsells_show_strikethrough
+                      ? `<span class="cf-up-compare">${formatPriceDirect(p.compare_price)}</span>`
+                      : ''}
+                    <span class="cf-up-price">${formatPriceDirect(p.price)}</span>
+                  </div>
+                </div>
+                <button class="cf-up-btn"
+                  onclick="cfAddUpsell('${p.shopify_variant_id}','${p.title}',${p.price})">
+                  ${v.upsells_button_text || '+Add'}
+                </button>
               </div>
-              <button class="cf-up-btn"
-                onclick="cfAddUpsell('${p.shopify_variant_id}','${p.title}',${p.price})">
-                ${v.upsells_button_text || '+Add'}
-              </button>
-            </div>
-          `).join('')}
-        `;
+            `).join('')}
+          `;
+        }
       }
     }
 
@@ -484,7 +541,7 @@
     // Savings
     const totalOrig = items.reduce((a, i) => a + (i.original_price || i.price) * i.quantity, 0);
     const totalSaved = totalOrig - cart.total_price;
-    if (totalSaved > 0) {
+    if (totalSaved > 0 && v.show_subtotal_line) {
       const savRow = document.getElementById('cf-savings');
       const savVal = document.getElementById('cf-savings-val');
       if (savRow) savRow.style.display = 'flex';
@@ -502,17 +559,12 @@
   }
 
   // ============================================
-  // CHECKOUT ROTEADO
+  // CHECKOUT — usa sku_map da config!
   // ============================================
-  async function buildCheckoutUrl(cartItems, config) {
+  function buildCheckoutUrl(cartItems, config) {
     const domain = config.routing?.active_store?.domain;
-    if (!domain) return null;
-
-    const skuMap = await getSkuMap(domain);
-    if (!skuMap || Object.keys(skuMap).length === 0) {
-      console.warn('[CartFlow] SKU map empty for:', domain);
-      return null;
-    }
+    const skuMap = config.routing?.sku_map;
+    if (!domain || !skuMap) return null;
 
     const lineItems = cartItems
       .map(item => {
@@ -544,6 +596,10 @@
   };
 
   window.cfAddUpsell = async (variantId, title, price) => {
+    if (!variantId) {
+      console.warn('[CartFlow] Upsell sem variant ID');
+      return;
+    }
     await fetch('/cart/add.js', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -561,7 +617,6 @@
   // ============================================
   function interceptCart() {
 
-    // Intercepta fetch /cart/add
     const origFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0] || '');
@@ -583,7 +638,6 @@
       return result;
     };
 
-    // Intercepta form submit
     document.addEventListener('submit', async (e) => {
       const form = e.target;
       const isCart = form.action?.includes('/cart/add') || form.querySelector('[name="add"]');
@@ -627,17 +681,14 @@
       }
     }, true);
 
-    // Intercepta cliques
     document.addEventListener('click', async (e) => {
       const t = e.target;
 
-      // Fechar
       if (t.id === 'cf-close' || t.id === 'cf-overlay') {
         closeCart();
         return;
       }
 
-      // Checkout — proteção contra duplo clique
       if (t.id === 'cf-checkout') {
         e.preventDefault();
         if (t.disabled) return;
@@ -645,7 +696,7 @@
         t.textContent = 'Redirecting...';
         try {
           const cart = await fetchShopifyCart();
-          const url = await buildCheckoutUrl(cart.items, window._cfConfig);
+          const url = buildCheckoutUrl(cart.items, window._cfConfig);
           trackEvent('checkout', cart.total_price / 100);
           window.location.href = url || '/checkout';
         } catch (e) {
@@ -655,7 +706,6 @@
         return;
       }
 
-      // Ícone de carrinho do tema
       const triggers = [
         '[href="/cart"]', '.cart-icon-bubble',
         '[data-cart-toggle]', '.header__icon--cart',
@@ -687,19 +737,12 @@
     injectStyles(config.visual || {});
     injectHTML(config.visual || {});
     interceptCart();
-    onCartReady(); // ← libera fila de eventos
-
-    // Pré-carregar SKU map em background
-    const domain = config.routing?.active_store?.domain;
-    if (domain) {
-      getSkuMap(domain).then(map => {
-        console.log(`[CartFlow] SKU map ready: ${Object.keys(map).length} variants`);
-      });
-    }
+    onCartReady();
 
     trackEvent('cart_impression');
     console.log('[CartFlow] ✓ Loaded');
     console.log('[CartFlow] Store:', config.routing?.active_store?.name || 'none');
+    console.log('[CartFlow] SKUs mapped:', Object.keys(config.routing?.sku_map || {}).length);
 
   } catch (err) {
     console.error('[CartFlow] Init error:', err);
