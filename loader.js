@@ -11,7 +11,8 @@
   let _pendingOpen = false;
   let _spActive = false;
   let _gwActive = false;
-  let _lastSkus = ''; // SKU cache for fetchUpsells
+  let _lastSkus = '';
+  let _vitrineSkuMap = null; // Cache do SKU map da loja vitrine
 
   function onCartReady() {
     _cartReady = true;
@@ -37,13 +38,6 @@
 
   function formatPriceDollars(val) {
     return '$' + Number(val).toFixed(2);
-  }
-
-  function stripHtml(html) {
-    if (!html) return '';
-    const d = document.createElement('div');
-    d.innerHTML = html;
-    return d.textContent || d.innerText || '';
   }
 
   function contrastText(hex) {
@@ -108,7 +102,33 @@
     } catch(e) { return null; }
   }
 
-  // ── Fetch upsells dynamically based on current cart SKUs (with cache) ──
+  // ── Vitrine SKU Map (cache) ──
+  async function getVitrineSkuMap() {
+    if (_vitrineSkuMap) return _vitrineSkuMap;
+    try {
+      _vitrineSkuMap = {};
+      let page = 1;
+      while (true) {
+        const res = await (window._cfOrigFetch || fetch)(`/products.json?limit=250&page=${page}`);
+        const data = await res.json();
+        if (!data.products || data.products.length === 0) break;
+        for (const p of data.products) {
+          for (const v of p.variants) {
+            if (v.sku) _vitrineSkuMap[v.sku] = v.id;
+          }
+        }
+        if (data.products.length < 250) break;
+        page++;
+      }
+      console.log('[CartFlow] Vitrine SKU map:', Object.keys(_vitrineSkuMap).length, 'variants');
+    } catch(e) {
+      console.warn('[CartFlow] Vitrine map error:', e);
+      _vitrineSkuMap = {};
+    }
+    return _vitrineSkuMap;
+  }
+
+  // ── Fetch upsells ──
   async function fetchUpsells(cart) {
     const skus = (cart.items || []).map(i => i.sku).filter(Boolean).join(',');
     if (!skus) {
@@ -116,7 +136,6 @@
       _lastSkus = '';
       return;
     }
-    // Skip if SKUs haven't changed
     if (skus === _lastSkus) return;
     _lastSkus = skus;
     try {
@@ -136,7 +155,6 @@
 
   async function fetchShopifyCart() { return (await (window._cfOrigFetch || fetch)('/cart.js')).json(); }
 
-  // ── Drawer Width ──
   function getDrawerWidth(v) {
     const dw = v.cart_width_desktop || 'default';
     return dw === 'narrow' ? '360px' : dw === 'wide' ? '500px' : '420px';
@@ -150,25 +168,18 @@
     if (_timerInterval) clearInterval(_timerInterval);
     const parts = (raw || '').split(':').map(Number);
     if (!parts.every(p => !isNaN(p)) || parts.length < 2) { _timerSeconds = 0; return; }
-
-    if (parts.length === 4) _timerSeconds = parts[0] * 86400 + parts[1] * 3600 + parts[2] * 60 + parts[3];
-    else if (parts.length === 3) _timerSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
-    else if (parts.length === 2) _timerSeconds = parts[0] * 60 + parts[1];
-    else { _timerSeconds = 0; return; }
-
+    if (parts.length === 4) _timerSeconds = parts[0]*86400 + parts[1]*3600 + parts[2]*60 + parts[3];
+    else if (parts.length === 3) _timerSeconds = parts[0]*3600 + parts[1]*60 + parts[2];
+    else _timerSeconds = parts[0]*60 + parts[1];
     _timerInterval = setInterval(() => {
-      if (_timerSeconds > 0) {
-        _timerSeconds--;
-        updateTimerDisplay();
-      } else clearInterval(_timerInterval);
+      if (_timerSeconds > 0) { _timerSeconds--; updateTimerDisplay(); }
+      else clearInterval(_timerInterval);
     }, 1000);
   }
 
   function formatTimer(s) {
-    const days = Math.floor(s / 86400);
-    const hours = Math.floor((s % 86400) / 3600);
-    const mins = Math.floor((s % 3600) / 60);
-    const secs = s % 60;
+    const days = Math.floor(s/86400), hours = Math.floor((s%86400)/3600);
+    const mins = Math.floor((s%3600)/60), secs = s%60;
     if (days > 0) return `${String(days).padStart(2,'0')}:${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
     return `${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
   }
@@ -186,41 +197,26 @@
     const blockBg = v.announcement_timer_block_bg || '#000000';
     const textColor = v.announcement_timer_text_color || '#FFFFFF';
     const annTextColor = v.announcement_text_color || '#333';
-
-    const days = Math.floor(_timerSeconds / 86400);
-    const hours = Math.floor((_timerSeconds % 86400) / 3600);
-    const mins = Math.floor((_timerSeconds % 3600) / 60);
-    const secs = _timerSeconds % 60;
-
+    const days = Math.floor(_timerSeconds/86400), hours = Math.floor((_timerSeconds%86400)/3600);
+    const mins = Math.floor((_timerSeconds%3600)/60), secs = _timerSeconds%60;
     const segments = [];
-    if (days > 0) segments.push({ value: days, label: labels[0] || 'DIAS' });
-    segments.push({ value: hours, label: labels[1] || 'HORAS' });
-    segments.push({ value: mins, label: labels[2] || 'MIN' });
-    segments.push({ value: secs, label: labels[3] || 'SEG' });
-
-    container.innerHTML = segments.map((seg, i) => {
-      const separator = i < segments.length - 1
-        ? `<span style="font-size:18px;font-weight:700;margin-top:-12px;color:${annTextColor}">:</span>`
-        : '';
-      return `
-        <div style="display:flex;flex-direction:column;align-items:center">
-          <div style="display:flex;align-items:center;justify-content:center;border-radius:6px;font-weight:700;width:36px;height:36px;font-size:16px;background:${blockBg};color:${textColor}">
-            ${String(seg.value).padStart(2,'0')}
-          </div>
-          <span style="font-size:9px;margin-top:2px;opacity:0.7;color:${annTextColor}">${seg.label}</span>
-        </div>
-        ${separator}
-      `;
-    }).join('');
+    if (days > 0) segments.push({ value: days, label: labels[0]||'DIAS' });
+    segments.push({ value: hours, label: labels[1]||'HORAS' });
+    segments.push({ value: mins, label: labels[2]||'MIN' });
+    segments.push({ value: secs, label: labels[3]||'SEG' });
+    container.innerHTML = segments.map((seg, i) => `
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <div style="display:flex;align-items:center;justify-content:center;border-radius:6px;font-weight:700;width:36px;height:36px;font-size:16px;background:${blockBg};color:${textColor}">${String(seg.value).padStart(2,'0')}</div>
+        <span style="font-size:9px;margin-top:2px;opacity:0.7;color:${annTextColor}">${seg.label}</span>
+      </div>
+      ${i < segments.length-1 ? `<span style="font-size:18px;font-weight:700;margin-top:-12px;color:${annTextColor}">:</span>` : ''}
+    `).join('');
   }
 
   // ── Styles ──
   function injectStyles(v) {
     const dw = getDrawerWidth(v);
     const mw = v.cart_width_mobile === 'default' ? '90vw' : '100vw';
-    const accentColor = v.accent_color || '#f6f6f7';
-    const accentTextColor = contrastText(accentColor);
-
     const style = document.createElement('style');
     style.id = 'cartflow-styles';
     style.textContent = `
@@ -234,20 +230,12 @@
         font-family:${v.inherit_fonts ? 'inherit' : 'system-ui,sans-serif'};
       }
       #cf-drawer.open { right:0; }
-
-      /* Scrollable body */
       #cf-body { flex:1;overflow-y:auto;display:flex;flex-direction:column; }
-
-      /* Empty */
       .cf-empty { text-align:center;padding:48px 16px;color:#999; }
       .cf-empty-icon { font-size:40px;margin-bottom:12px; }
-
-      /* Hide native Shopify cart */
       cart-drawer,cart-notification,.cart-drawer,.cart-notification,#cart-drawer,#CartDrawer,
       #cart-notification,[id*="cart-drawer"],[class*="cart-drawer"],drawer-component[id*="cart"],
       .shopify-section-cart-drawer { display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
-
-      /* FIX #3: Reset all button styles to prevent Shopify theme inheritance */
       #cf-checkout {
         all: unset !important;
         box-sizing: border-box !important;
@@ -268,19 +256,15 @@
         box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
         transition: background-color 0.15s ease, opacity 0.15s ease !important;
       }
-
-      @media (max-width:480px) {
-        #cf-drawer { width:${mw};right:-${mw}; }
-      }
+      @media (max-width:480px) { #cf-drawer { width:${mw};right:-${mw}; } }
     `;
     document.head.appendChild(style);
   }
 
-  // ── Build HTML ──
+  // ── HTML ──
   function injectHTML(v) {
     const overlay = document.createElement('div');
     overlay.id = 'cf-overlay';
-
     const borderMap = { none:'0px', thin:'1px', normal:'2px', thick:'3px' };
     const bdr = borderMap[v.header_border_thickness] || '1px';
     const headingMap = { h2:{fs:22,fw:700}, h3:{fs:18,fw:600}, h4:{fs:16,fw:600} };
@@ -291,7 +275,6 @@
     const headerPy = v.header_height === 'tall' ? '20px' : '12px';
     const headerJustify = v.header_alignment === 'center' ? 'center' : v.header_alignment === 'right' ? 'flex-end' : 'flex-start';
     const isCloseLeft = v.close_button_position === 'left';
-
     const headerTitleHtml = v.header_title_type === 'logo' && v.header_logo_url
       ? `<img id="cf-header-logo" src="${v.header_logo_url}" alt="Logo" style="height:${v.header_logo_size||32}px;object-fit:contain;" />`
       : `<${v.header_heading_level||'h3'} id="cf-title-el" style="font-size:${hd.fs}px;font-weight:${hd.fw};margin:0;${v.header_text_color_override?'color:'+v.header_text_color_override+';':''}">Cart • 0</${v.header_heading_level||'h3'}>`;
@@ -299,14 +282,11 @@
     overlay.innerHTML = `
       <div id="cf-drawer">
         <div id="cf-header" style="padding:${headerPy} 16px;display:flex;align-items:center;flex-shrink:0;background:${v.header_bg_color||'#FFFFFF'};${v.header_border_thickness!=='none'?'border-bottom:'+bdr+' solid '+(v.header_border_color||'#e5e7eb')+';':''}${isCloseLeft?'flex-direction:row-reverse;':''}">
-          <div style="flex:1;display:flex;align-items:center;justify-content:${headerJustify}">
-            ${headerTitleHtml}
-          </div>
+          <div style="flex:1;display:flex;align-items:center;justify-content:${headerJustify}">${headerTitleHtml}</div>
           <button id="cf-close" style="background:${v.close_bg_color||'transparent'};border:none;cursor:pointer;padding:4px;line-height:0;border-radius:4px;flex-shrink:0;width:${parseInt(closeSz)+8}px;height:${parseInt(closeSz)+8}px;display:flex;align-items:center;justify-content:center;color:${v.close_icon_color||'#000'};transition:all 0.15s;">
             ${SVG_ICONS.close(closeSw)}
           </button>
         </div>
-
         <div id="cf-body">
           <div id="cf-ann-before"></div>
           <div id="cf-rewards"></div>
@@ -316,7 +296,6 @@
           <div id="cf-upsells-bottom"></div>
           <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
         </div>
-
         <div id="cf-footer" style="flex-shrink:0;border-top:1px solid rgba(0,0,0,0.08);">
           <div id="cf-badges-top"></div>
           <div class="cf-footer-inner" style="padding:12px 16px;">
@@ -325,10 +304,7 @@
               <span style="font-weight:500">Subtotal:</span>
               <span id="cf-subtotal" style="font-weight:700"></span>
             </div>
-            <button id="cf-checkout">
-              ${SVG_ICONS.lock}
-              Secure Checkout
-            </button>
+            <button id="cf-checkout">${SVG_ICONS.lock} Secure Checkout</button>
             <div id="cf-continue-wrap"></div>
             <div id="cf-express-wrap"></div>
           </div>
@@ -338,37 +314,18 @@
     `;
     document.body.appendChild(overlay);
 
-    // Close button hover
     const closeBtn = document.getElementById('cf-close');
     if (closeBtn) {
-      closeBtn.onmouseenter = () => {
-        closeBtn.style.background = v.close_bg_hover_color || '#f3f4f6';
-        closeBtn.style.color = v.close_icon_hover_color || '#666';
-      };
-      closeBtn.onmouseleave = () => {
-        closeBtn.style.background = v.close_bg_color || 'transparent';
-        closeBtn.style.color = v.close_icon_color || '#000';
-      };
+      closeBtn.onmouseenter = () => { closeBtn.style.background = v.close_bg_hover_color||'#f3f4f6'; closeBtn.style.color = v.close_icon_hover_color||'#666'; };
+      closeBtn.onmouseleave = () => { closeBtn.style.background = v.close_bg_color||'transparent'; closeBtn.style.color = v.close_icon_color||'#000'; };
     }
-
-    // FIX #3: Checkout button hover — use !important to override theme styles
     const ckBtn = document.getElementById('cf-checkout');
     if (ckBtn) {
-      ckBtn.onmouseenter = () => {
-        if (v.button_hover_color) {
-          ckBtn.style.setProperty('background', v.button_hover_color, 'important');
-        } else {
-          ckBtn.style.setProperty('opacity', '0.85', 'important');
-        }
-      };
-      ckBtn.onmouseleave = () => {
-        ckBtn.style.setProperty('background', v.button_color || '#000', 'important');
-        ckBtn.style.setProperty('opacity', '1', 'important');
-      };
+      ckBtn.onmouseenter = () => { if (v.button_hover_color) ckBtn.style.setProperty('background', v.button_hover_color, 'important'); else ckBtn.style.setProperty('opacity', '0.85', 'important'); };
+      ckBtn.onmouseleave = () => { ckBtn.style.setProperty('background', v.button_color||'#000', 'important'); ckBtn.style.setProperty('opacity', '1', 'important'); };
     }
   }
 
-  // ── Open / Close ──
   function openCart() {
     document.getElementById('cf-overlay')?.classList.add('open');
     document.getElementById('cf-drawer')?.classList.add('open');
@@ -380,52 +337,37 @@
     document.body.style.overflow = '';
   }
 
-  // ── Build upsell variant selects HTML ──
+  // ── Upsell variant selects ──
   function buildUpsellVariantHtml(product, v) {
     const variants = product.variants || [];
-    // Filter meaningful variants (not "Default Title")
-    const meaningful = variants.filter(vr =>
-      vr.option_value && vr.option_value !== 'Default Title' && vr.option_value.trim() !== ''
-    );
-
+    const meaningful = variants.filter(vr => vr.option_value && vr.option_value !== 'Default Title' && vr.option_value.trim() !== '');
     if (meaningful.length === 0) {
-      // No meaningful variants — show single "Default" select
-      return `<span data-cf-product-id="${product.id}" data-cf-selected-variant="${variants[0]?.shopify_variant_id || ''}" style="display:flex;gap:8px;flex:1;min-width:0"><select class="cf-upsell-select" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option>Default</option></select></span>`;
+      return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${variants[0]?.sku||''}" style="display:flex;gap:8px;flex:1;min-width:0"><select class="cf-upsell-select" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option>Default</option></select></span>`;
     }
-
-    // Group options by option_name
-    // option_value format: "Black" or "Black / M" (name1_val / name2_val)
     const optionGroups = new Map();
     for (const vr of meaningful) {
-      const parts = (vr.option_value || '').split('/').map(p => p.trim());
-      const name = vr.option_name || 'Option';
+      const parts = (vr.option_value||'').split('/').map(p => p.trim());
+      const name = vr.option_name||'Option';
       const names = name.split('/').map(n => n.trim());
       names.forEach((n, idx) => {
         if (!optionGroups.has(n)) optionGroups.set(n, new Set());
         if (parts[idx]) optionGroups.get(n).add(parts[idx]);
       });
     }
-
-    // Default values from first variant
-    const firstValues = (meaningful[0].option_value || '').split('/').map(val => val.trim());
-    const defaultShopifyId = meaningful[0].shopify_variant_id || variants[0]?.shopify_variant_id || '';
-
+    const firstValues = (meaningful[0].option_value||'').split('/').map(val => val.trim());
+    const defaultSku = meaningful[0].sku || variants[0]?.sku || '';
     let selectsHtml = '';
     let idx = 0;
     for (const [name, valuesSet] of optionGroups) {
       const values = [...valuesSet];
-      const defaultVal = firstValues[idx] || values[0];
-      const options = values.map(val =>
-        `<option value="${val}"${val === defaultVal ? ' selected' : ''}>${val}</option>`
-      ).join('');
-selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0">${options}</select>`;
+      const defaultVal = firstValues[idx]||values[0];
+      const options = values.map(val => `<option value="${val}"${val===defaultVal?' selected':''}>${val}</option>`).join('');
+      selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0">${options}</select>`;
       idx++;
     }
-
-    return `<span data-cf-product-id="${product.id}" data-cf-selected-variant="${defaultShopifyId}" style="display:flex;gap:8px;flex:1;min-width:0">${selectsHtml}</span>`;
+    return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${defaultSku}" style="display:flex;gap:8px;flex:1;min-width:0">${selectsHtml}</span>`;
   }
 
-  // ── Update upsell variant when select changes ──
   window.cfUpdateUpsellVariant = function(selectEl) {
     const wrapper = selectEl.closest('[data-cf-product-id]');
     if (!wrapper) return;
@@ -433,23 +375,16 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
     const upsells = window._cfConfig?.upsells || [];
     const product = upsells.find(p => p.id === productId);
     if (!product) return;
-
-    // Read all selected values from the wrapper's selects
     const selects = wrapper.querySelectorAll('select[data-cf-option]');
     const selectedValues = [];
     selects.forEach(s => selectedValues.push(s.value));
     const selectedKey = selectedValues.join(' / ');
-
-    // Find matching variant
     const variants = product.variants || [];
     const match = variants.find(vr => {
-      const vrKey = (vr.option_value || '').split('/').map(p => p.trim()).join(' / ');
+      const vrKey = (vr.option_value||'').split('/').map(p => p.trim()).join(' / ');
       return vrKey === selectedKey;
     });
-
-    if (match && match.shopify_variant_id) {
-      wrapper.setAttribute('data-cf-selected-variant', match.shopify_variant_id);
-    }
+    if (match?.sku) wrapper.setAttribute('data-cf-selected-sku', match.sku);
   };
 
   // ── Render ──
@@ -460,52 +395,37 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
     const accentColor = v.accent_color || '#f6f6f7';
     const accentTextColor = contrastText(accentColor);
 
-    // Title
     const titleEl = document.getElementById('cf-title-el');
-    if (titleEl) {
-      titleEl.textContent = (v.header_title_text || 'Cart • {{cart_quantity}}').replace('{{cart_quantity}}', count);
-    }
+    if (titleEl) titleEl.textContent = (v.header_title_text||'Cart • {{cart_quantity}}').replace('{{cart_quantity}}', count);
 
-    // Announcement
     const annBefore = document.getElementById('cf-ann-before');
     const annAfter = document.getElementById('cf-ann-after');
     if (annBefore) annBefore.innerHTML = '';
     if (annAfter) annAfter.innerHTML = '';
     if (v.announcement_enabled && v.announcement_text) {
-      const annHeightPy = v.announcement_height === 'compact' ? '6px' : v.announcement_height === 'tall' ? '16px' : '10px';
-      const annAlign = v.announcement_alignment || 'center';
-      const isBlocks = v.announcement_timer_style === 'blocks';
-      const inlineTimerHtml = _timerSeconds > 0 && !isBlocks ? `<span style="font-weight:600">${formatTimer(_timerSeconds)}</span>` : '';
-      const annText = (v.announcement_text || '').replace('{{timer}}', inlineTimerHtml);
-      const blocksHtml = _timerSeconds > 0 && isBlocks ? `<div id="cf-timer-blocks" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px;"></div>` : '';
-
-      const annHtml = `
-        <div style="padding:${annHeightPy} 16px;background:${v.announcement_bg_color||'#f2f2f2'};border-bottom:1px solid ${v.announcement_border_color||'#efefef'};color:${v.announcement_text_color||'#333'};font-size:${v.announcement_font_size||14}px;text-align:${annAlign};flex-shrink:0;">
-          <div>${annText}</div>
-          ${blocksHtml}
-        </div>
-      `;
-      const target = v.announcement_position === 'after' ? annAfter : annBefore;
+      const annHeightPy = v.announcement_height==='compact'?'6px':v.announcement_height==='tall'?'16px':'10px';
+      const annAlign = v.announcement_alignment||'center';
+      const isBlocks = v.announcement_timer_style==='blocks';
+      const inlineTimerHtml = _timerSeconds>0 && !isBlocks ? `<span style="font-weight:600">${formatTimer(_timerSeconds)}</span>` : '';
+      const annText = (v.announcement_text||'').replace('{{timer}}', inlineTimerHtml);
+      const blocksHtml = _timerSeconds>0 && isBlocks ? `<div id="cf-timer-blocks" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px;"></div>` : '';
+      const annHtml = `<div style="padding:${annHeightPy} 16px;background:${v.announcement_bg_color||'#f2f2f2'};border-bottom:1px solid ${v.announcement_border_color||'#efefef'};color:${v.announcement_text_color||'#333'};font-size:${v.announcement_font_size||14}px;text-align:${annAlign};flex-shrink:0;"><div>${annText}</div>${blocksHtml}</div>`;
+      const target = v.announcement_position==='after' ? annAfter : annBefore;
       if (target) {
         target.innerHTML = annHtml;
-        if (_timerSeconds > 0 && isBlocks) {
-          const blockEl = document.getElementById('cf-timer-blocks');
-          if (blockEl) renderTimerBlocks(blockEl, v);
-        }
+        if (_timerSeconds>0 && isBlocks) { const blockEl = document.getElementById('cf-timer-blocks'); if (blockEl) renderTimerBlocks(blockEl, v); }
       }
     }
 
-    // ── Rewards ──
     const rwEl = document.getElementById('cf-rewards');
     const tiers = config.rewards || [];
     const showOnEmpty = v.rewards_show_on_empty !== false;
     let rewardDiscount = 0;
     let activeRewardLabels = [];
-
     if (rwEl) {
       rwEl.innerHTML = '';
       if (v.rewards_enabled && tiers.length > 0 && (count > 0 || showOnEmpty)) {
-        const isQty = (v.rewards_calculation || 'cart_total') === 'quantity';
+        const isQty = (v.rewards_calculation||'cart_total') === 'quantity';
         const totalQty = count;
         const totalValue = cart.total_price / 100;
         const simValue = isQty ? totalQty : totalValue;
@@ -513,8 +433,6 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
         const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
         const rawSubtotal = rawSubtotalCents / 100;
         const cheapestPrice = items.length > 0 ? Math.min(...items.map(i => i.price)) / 100 : 0;
-
-        // Calculate unlocked tiers and discounts
         const unlockedTiers = sorted.filter(t => simValue >= t.minimum_value);
         const byType = new Map();
         for (const tier of unlockedTiers) {
@@ -524,52 +442,34 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
           if (!existing || amount > existing.amount) byType.set(tier.reward_type, { amount, label });
         }
         byType.forEach(({ amount, label }) => { rewardDiscount += amount; activeRewardLabels.push(label); });
-
         const cidx = sorted.findIndex(t => simValue < t.minimum_value);
         const nextT = cidx >= 0 ? sorted[cidx] : null;
-        const rem = nextT ? (isQty ? `${nextT.minimum_value - simValue}` : `$${(nextT.minimum_value - simValue).toFixed(0)}`) : null;
+        const rem = nextT ? (isQty ? `${nextT.minimum_value-simValue}` : `$${(nextT.minimum_value-simValue).toFixed(0)}`) : null;
         const rawText = nextT
-          ? (nextT.title_before || `Add {remaining} more to unlock ${nextT.reward_description||'the next reward'}`)
-              .replace('{remaining}', String(rem)).replace('{{count}}', String(totalQty))
+          ? (nextT.title_before || `Add {remaining} more to unlock ${nextT.reward_description||'the next reward'}`).replace('{remaining}', String(rem)).replace('{{count}}', String(totalQty))
           : (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
-        const statusText = rawText;
-
         let barHtml = '<div style="display:flex;align-items:center;gap:0">';
         let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
         sorted.forEach((tier, idx) => {
-          const segStart = idx === 0 ? 0 : sorted[idx-1].minimum_value;
+          const segStart = idx===0 ? 0 : sorted[idx-1].minimum_value;
           const segEnd = tier.minimum_value;
           const segRange = segEnd - segStart;
-          const lp = segRange > 0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
+          const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
           const reached = simValue >= tier.minimum_value;
-          const iconKey = tier.icon || 'gift';
-          const iconSvg = SVG_ICONS[iconKey] || SVG_ICONS.gift;
-
-          barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'}">`;
-          barHtml += `<div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'};transition:width 0.4s;width:${lp}%"></div></div>`;
+          const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
           const circleSize = reached ? 28 : 20;
+          barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'}"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'};transition:width 0.4s;width:${lp}%"></div></div>`;
           barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'};color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'}">`;
           barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
           barHtml += '</div>';
-
           labelsHtml += '<div style="flex:1"></div>';
-          labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description || tier.reward_type || ''}</span></div>`;
+          labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
         });
-        barHtml += '</div>';
-        labelsHtml += '</div>';
-
-        rwEl.innerHTML = `
-          <div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;">
-            <div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${v.rewards_font_size||14}px;min-height:40px;display:flex;align-items:center;justify-content:center">
-              <span>${statusText}</span>
-            </div>
-            ${barHtml}${labelsHtml}
-          </div>
-        `;
+        barHtml += '</div>'; labelsHtml += '</div>';
+        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${v.rewards_font_size||14}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
       }
     }
 
-    // ── Items ──
     const itemsEl = document.getElementById('cf-items');
     if (itemsEl) {
       if (items.length === 0) {
@@ -577,44 +477,34 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
       } else {
         const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
         const rawSubtotalDollars = rawSubtotalCents / 100;
-
         itemsEl.innerHTML = items.map((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
-          const lineCompare = (item.original_price || item.price) * item.quantity;
+          const lineCompare = (item.original_price||item.price) * item.quantity;
           const lineCompareDollars = lineCompare / 100;
           const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
           const itemRewardDiscount = rewardDiscount * itemShare;
           const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
           const totalSavingsItem = lineCompareDollars - discountedTotal;
-
           const hasDis = lineCompareDollars > discountedTotal;
-
           const productTitle = item.product_title || item.title;
-
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
             const meaningful = item.options_with_values.filter(o => o.value !== 'Default Title');
-            if (meaningful.length > 0) {
-              variantLabel = meaningful.map(o => `${o.name}: ${o.value}`).join(' / ');
-            }
+            if (meaningful.length > 0) variantLabel = meaningful.map(o => `${o.name}: ${o.value}`).join(' / ');
           } else if (item.variant_title && item.variant_title !== 'Default Title') {
             variantLabel = item.variant_title;
           }
-
-          const borderBottom = idx < items.length - 1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
-
+          const borderBottom = idx < items.length-1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
           return `
             <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
-              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center">
-                <img src="${item.image || item.featured_image?.url || '/placeholder.svg'}" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" />
+              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;">
+                <img src="${item.image||item.featured_image?.url||'/placeholder.svg'}" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" />
               </div>
               <div style="flex:1;min-width:0">
                 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
                   <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;margin:0">${productTitle}</p>
-                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;flex-shrink:0;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">
-                    ${SVG_ICONS.trash}
-                  </span>
+                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;flex-shrink:0;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px">
                   <div style="display:flex;flex-direction:column;gap:4px">
@@ -632,35 +522,30 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
                   </div>
                 </div>
               </div>
-            </div>
-          `;
+            </div>`;
         }).join('');
       }
     }
 
-    // ── Upsells ──
     const upsells = config.upsells || [];
     const topEl = document.getElementById('cf-upsells-top');
     const btmEl = document.getElementById('cf-upsells-bottom');
     if (topEl) topEl.innerHTML = '';
     if (btmEl) btmEl.innerHTML = '';
     if (v.upsells_enabled && upsells.length > 0) {
-      const titleFontSize = v.upsells_title_font_size || 14;
-      const titleColor = v.upsells_title_color || undefined;
       const upsellBg = accentColor;
       const upsellText = accentTextColor;
-      const isStack = (v.upsells_direction || 'stack') !== 'inline';
-
+      const isStack = (v.upsells_direction||'stack') !== 'inline';
       const html = `
-        <div style="padding:12px 16px 12px 16px;border-top:1px solid rgba(0,0,0,0.08);margin-top:16px">
-          <p style="font-size:${titleFontSize}px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-align:center;opacity:0.6;margin:0 0 12px 0;${titleColor?'color:'+titleColor+';':''}">${v.upsells_title||'RECOMMENDED FOR YOU'}</p>
+        <div style="padding:12px 16px;border-top:1px solid rgba(0,0,0,0.08);margin-top:16px">
+          <p style="font-size:${v.upsells_title_font_size||14}px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-align:center;opacity:0.6;margin:0 0 12px 0">${v.upsells_title||'RECOMMENDED FOR YOU'}</p>
           <div style="display:flex;${isStack?'flex-direction:column;gap:12px':'gap:8px;overflow-x:auto'}">
             ${upsells.map(p => {
               const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
-              const variantSelectsHtml = buildUpsellVariantHtml(p, v);
+              const variantHtml = buildUpsellVariantHtml(p, v);
               return `
                 <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
-                  ${p.image_url ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0"><img src="${p.image_url}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
+                  ${p.image_url ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0"><img src="${p.image_url}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
                   <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
                     <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
@@ -668,187 +553,102 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
                       <span style="font-size:12px;font-weight:600">${formatPriceDollars(p.price||0)}</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-                      ${variantSelectsHtml}
+                      ${variantHtml}
                       <button onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>
                     </div>
                   </div>
-                </div>
-              `;
+                </div>`;
             }).join('')}
           </div>
-        </div>
-      `;
+        </div>`;
       const target = (v.upsells_position||'bottom') === 'top' ? topEl : btmEl;
       if (target) target.innerHTML = html;
     }
 
-    // ── Add-ons ──
     const addonEl = document.getElementById('cf-addon-section');
     if (addonEl) {
       addonEl.innerHTML = '';
       let addonHtml = '';
       if (v.shipping_protection_enabled) {
-        const spIcon = v.sp_icon || '';
-        const spTitle = v.sp_title || 'Shipping Protection';
-        const spDesc = v.sp_description || 'Coverage against loss, damage, or theft.';
-        const spPrice = Number(v.sp_price || 4.99);
-        const spPriceText = v.sp_price_type === 'percentage' ? `${spPrice}%` : formatPriceDollars(spPrice);
-        addonHtml += `
-          <div style="padding:12px 16px 0 16px">
-            <div id="cf-addon-sp" onclick="window.cfToggleAddon('sp')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_spActive?'#059669':'rgba(0,0,0,0.10)'};background:${_spActive?'rgba(5,150,105,0.04)':'transparent'}">
-              <div style="display:flex;align-items:center;justify-content:space-between">
-                <div style="display:flex;align-items:center;gap:8px">
-                  <div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_spActive?'background:#059669;border:none':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">
-                    ${_spActive ? SVG_ICONS.check : ''}
-                  </div>
-                  ${spIcon ? `<img src="${spIcon}" alt="SP" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'" />` : ''}
-                  <div>
-                    <p style="font-size:12px;font-weight:600;margin:0">${spTitle}</p>
-                    <p style="font-size:12px;opacity:0.6;margin:0">${spDesc}</p>
-                  </div>
-                </div>
-                <span style="font-size:14px;font-weight:600;flex-shrink:0;margin-left:8px">${spPriceText}</span>
-              </div>
-            </div>
-          </div>
-        `;
+        const spTitle = v.sp_title||'Shipping Protection';
+        const spDesc = v.sp_description||'Coverage against loss, damage, or theft.';
+        const spPrice = Number(v.sp_price||4.99);
+        const spPriceText = v.sp_price_type==='percentage' ? `${spPrice}%` : formatPriceDollars(spPrice);
+        addonHtml += `<div style="padding:12px 16px 0 16px"><div id="cf-addon-sp" onclick="window.cfToggleAddon('sp')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_spActive?'#059669':'rgba(0,0,0,0.10)'};background:${_spActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_spActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_spActive?SVG_ICONS.check:''}</div>${v.sp_icon?`<img src="${v.sp_icon}" alt="SP" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:12px;font-weight:600;margin:0">${spTitle}</p><p style="font-size:12px;opacity:0.6;margin:0">${spDesc}</p></div></div><span style="font-size:14px;font-weight:600;flex-shrink:0;margin-left:8px">${spPriceText}</span></div></div></div>`;
       }
       if (v.gift_wrap_enabled) {
-        const gwIcon = v.gw_icon || '';
-        const gwTitle = v.gw_title || 'Gift Wrapping';
-        const gwDesc = v.gw_description || 'Beautiful gift wrapping for your order.';
-        const gwPrice = Number(v.gift_wrap_price || 2.99);
-        addonHtml += `
-          <div style="padding:8px 16px 0 16px">
-            <div id="cf-addon-gw" onclick="window.cfToggleAddon('gw')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_gwActive?'#059669':'rgba(0,0,0,0.10)'};background:${_gwActive?'rgba(5,150,105,0.04)':'transparent'}">
-              <div style="display:flex;align-items:center;justify-content:space-between">
-                <div style="display:flex;align-items:center;gap:8px">
-                  <div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_gwActive?'background:#059669;border:none':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">
-                    ${_gwActive ? SVG_ICONS.check : ''}
-                  </div>
-                  ${gwIcon ? `<img src="${gwIcon}" alt="GW" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'" />` : ''}
-                  <div>
-                    <p style="font-size:12px;font-weight:600;margin:0">${gwTitle}</p>
-                    <p style="font-size:12px;opacity:0.6;margin:0">${gwDesc}</p>
-                  </div>
-                </div>
-                <span style="font-size:14px;font-weight:600;flex-shrink:0;margin-left:8px">${formatPriceDollars(gwPrice)}</span>
-              </div>
-            </div>
-          </div>
-        `;
+        const gwTitle = v.gw_title||'Gift Wrapping';
+        const gwDesc = v.gw_description||'Beautiful gift wrapping for your order.';
+        const gwPrice = Number(v.gift_wrap_price||2.99);
+        addonHtml += `<div style="padding:8px 16px 0 16px"><div id="cf-addon-gw" onclick="window.cfToggleAddon('gw')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_gwActive?'#059669':'rgba(0,0,0,0.10)'};background:${_gwActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_gwActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_gwActive?SVG_ICONS.check:''}</div>${v.gw_icon?`<img src="${v.gw_icon}" alt="GW" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:12px;font-weight:600;margin:0">${gwTitle}</p><p style="font-size:12px;opacity:0.6;margin:0">${gwDesc}</p></div></div><span style="font-size:14px;font-weight:600;flex-shrink:0;margin-left:8px">${formatPriceDollars(gwPrice)}</span></div></div></div>`;
       }
       if (addonHtml) addonEl.innerHTML = addonHtml;
     }
 
-    // ── Trust badges ──
     const badgesTop = document.getElementById('cf-badges-top');
     const badgesBot = document.getElementById('cf-badges-bottom');
     if (badgesTop) badgesTop.innerHTML = '';
     if (badgesBot) badgesBot.innerHTML = '';
     if (v.trust_badges_enabled) {
-      const preset = v.trust_badges_preset || 'returns_warranty';
-      const badgeText = PRESETS[preset] || '';
-      const badgeImgUrl = v.trust_badges_image_url || '';
-      const badgeSize = v.trust_badges_image_size || 40;
-      const badgePos = v.trust_badges_position || 'below';
+      const badgeImgUrl = v.trust_badges_image_url||'';
+      const badgeSize = v.trust_badges_image_size||40;
+      const badgePos = v.trust_badges_position||'below';
       let badgeHtml = '';
-      if (badgeImgUrl) {
-        badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${badgeImgUrl}" alt="Trust Badge" style="max-height:${badgeSize}px;max-width:100%;object-fit:contain" /></div>`;
-      } else if (badgeText) {
-        badgeHtml = `<div style="text-align:center;padding:8px 16px;font-size:11px;opacity:0.6">${SVG_ICONS.shield} ${badgeText}</div>`;
-      }
-      const target = badgePos === 'above' ? badgesTop : badgesBot;
+      if (badgeImgUrl) badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${badgeImgUrl}" alt="Trust Badge" style="max-height:${badgeSize}px;max-width:100%;object-fit:contain"/></div>`;
+      else if (PRESETS[v.trust_badges_preset]) badgeHtml = `<div style="text-align:center;padding:8px 16px;font-size:11px;opacity:0.6">${SVG_ICONS.shield} ${PRESETS[v.trust_badges_preset]}</div>`;
+      const target = badgePos==='above' ? badgesTop : badgesBot;
       if (target && badgeHtml) target.innerHTML = badgeHtml;
     }
 
-    // ── Subtotal ──
     const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
     const rawSubtotalDollars = rawSubtotalCents / 100;
     let addonTotal = 0;
     if (_spActive && v.shipping_protection_enabled) {
-      const spPrice = Number(v.sp_price || 4.99);
-      addonTotal += v.sp_price_type === 'percentage' ? rawSubtotalDollars * spPrice / 100 : spPrice;
+      const spPrice = Number(v.sp_price||4.99);
+      addonTotal += v.sp_price_type==='percentage' ? rawSubtotalDollars*spPrice/100 : spPrice;
     }
-    if (_gwActive && v.gift_wrap_enabled) addonTotal += Number(v.gift_wrap_price || 2.99);
+    if (_gwActive && v.gift_wrap_enabled) addonTotal += Number(v.gift_wrap_price||2.99);
     const finalSubtotal = Math.max(0, rawSubtotalDollars - rewardDiscount + addonTotal);
-
     const subtotalEl = document.getElementById('cf-subtotal');
     if (subtotalEl) subtotalEl.textContent = formatPriceDollars(finalSubtotal);
 
-    // Discount row
     const discRow = document.getElementById('cf-discounts-row');
     if (discRow) {
       if (rewardDiscount > 0 && activeRewardLabels.length > 0) {
         discRow.style.display = 'flex';
         discRow.innerHTML = `<span style="color:${v.savings_color||'#22c55e'};font-weight:500">${activeRewardLabels.join(' + ')}</span><span style="color:${v.savings_color||'#22c55e'};font-weight:600">-${formatPriceDollars(rewardDiscount)}</span>`;
-      } else {
-        discRow.style.display = 'none';
-        discRow.innerHTML = '';
-      }
+      } else { discRow.style.display = 'none'; discRow.innerHTML = ''; }
     }
 
-    // Subtotal row visibility
     const subtotalRow = document.getElementById('cf-subtotal-row');
-    if (subtotalRow) subtotalRow.style.display = v.show_subtotal_line === false ? 'none' : 'flex';
+    if (subtotalRow) subtotalRow.style.display = v.show_subtotal_line===false ? 'none' : 'flex';
 
-    // Continue Shopping
     const contWrap = document.getElementById('cf-continue-wrap');
-    if (contWrap) {
-      contWrap.innerHTML = '';
-      if (v.show_continue_shopping) {
-        contWrap.innerHTML = `<button onclick="closeCart()" style="all:unset;box-sizing:border-box;width:100%;display:block;text-align:center;font-size:13px;margin-top:8px;cursor:pointer;opacity:0.6;text-decoration:underline">Continue Shopping</button>`;
-      }
-    }
+    if (contWrap) contWrap.innerHTML = v.show_continue_shopping ? `<button onclick="closeCart()" style="all:unset;box-sizing:border-box;width:100%;display:block;text-align:center;font-size:13px;margin-top:8px;cursor:pointer;opacity:0.6;text-decoration:underline">Continue Shopping</button>` : '';
   }
 
-  // ── Checkout URL ──
+  // ── Checkout ──
   async function buildCheckoutUrl(cartItems, config) {
     const routing = config?.routing || {};
     const skuMap = routing.sku_map || {};
     const activeDomain = routing.active_store?.domain;
     const v = config?.visual || {};
-
     if (!activeDomain) return '/checkout';
-
     const lineItems = [];
     for (const item of cartItems) {
       const mappedId = skuMap[item.sku];
       if (mappedId) lineItems.push(`${mappedId}:${item.quantity}`);
     }
-
-    // Add SP addon
-    if (_spActive && v.sp_sku) {
-      const mappedSp = skuMap[v.sp_sku];
-      if (mappedSp) lineItems.push(`${mappedSp}:1`);
-    }
-    // Add GW addon
-    if (_gwActive && v.gw_sku) {
-      const mappedGw = skuMap[v.gw_sku];
-      if (mappedGw) lineItems.push(`${mappedGw}:1`);
-    }
-
+    if (_spActive && v.sp_sku) { const m = skuMap[v.sp_sku]; if (m) lineItems.push(`${m}:1`); }
+    if (_gwActive && v.gw_sku) { const m = skuMap[v.gw_sku]; if (m) lineItems.push(`${m}:1`); }
     if (lineItems.length === 0) return '/checkout';
-
     let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(',')}`;
-
-    // Apply active reward coupon
     const tiers = config.rewards || [];
-    const vConfig = config.visual || {};
-    const isQty = (vConfig.rewards_calculation || 'cart_total') === 'quantity';
-    const totalQty = cartItems.reduce((a,i) => a + i.quantity, 0);
-    const totalValue = cartItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
-    const simValue = isQty ? totalQty : totalValue;
-    const sorted = [...tiers].sort((a,b) => a.minimum_value - b.minimum_value);
-    const unlockedTiers = sorted.filter(t => simValue >= t.minimum_value);
-
-    if (unlockedTiers.length > 0) {
-      const bestCouponTier = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-      if (bestCouponTier?.shopify_coupon) {
-        checkoutUrl += `?discount=${encodeURIComponent(bestCouponTier.shopify_coupon)}`;
-      }
-    }
-
+    const isQty = (v.rewards_calculation||'cart_total') === 'quantity';
+    const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
+    const unlockedTiers = tiers.filter(t => simValue >= t.minimum_value);
+    const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
+    if (bestCoupon?.shopify_coupon) checkoutUrl += `?discount=${encodeURIComponent(bestCoupon.shopify_coupon)}`;
     return checkoutUrl;
   }
 
@@ -856,104 +656,67 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
   window.cfToggleAddon = (type) => {
     if (type === 'sp') _spActive = !_spActive;
     if (type === 'gw') _gwActive = !_gwActive;
-    fetchShopifyCart().then(cart => {
-      if (window._cfConfig) renderCart(cart, window._cfConfig);
-    });
+    fetchShopifyCart().then(cart => { if (window._cfConfig) renderCart(cart, window._cfConfig); });
   };
 
   // ── Global Functions ──
   window.cfQty = async (key, qty) => {
     if (qty < 0) return;
-    await (window._cfOrigFetch || fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
+    await (window._cfOrigFetch||fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
     const cart = await fetchShopifyCart();
-    if (window._cfConfig) {
-      _lastSkus = ''; // Force re-fetch upsells after qty change
-      await fetchUpsells(cart);
-      renderCart(cart, window._cfConfig);
-    }
+    if (window._cfConfig) { _lastSkus=''; await fetchUpsells(cart); renderCart(cart, window._cfConfig); }
   };
 
-  // ── Add Upsell (uses shopify_variant_id from variants) ──
-window.cfAddUpsell = async (productId) => {
-  if (!productId) return;
-  const upsells = window._cfConfig?.upsells || [];
-  const product = upsells.find(p => p.id === productId);
-  if (!product) { console.warn('[CartFlow] Upsell not found:', productId); return; }
+  // ── Add Upsell — busca variant_id na loja vitrine pelo SKU (com cache) ──
+  window.cfAddUpsell = async (productId) => {
+    if (!productId) return;
+    const upsells = window._cfConfig?.upsells || [];
+    const product = upsells.find(p => p.id === productId);
+    if (!product) { console.warn('[CartFlow] Upsell not found:', productId); return; }
 
-  // Pegar variante selecionada no select
-  const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
-  const wrapper = card?.querySelector('[data-cf-selected-variant]');
-  const selectedVariantId = wrapper?.getAttribute('data-cf-selected-variant');
-
-  // Pegar SKU da variante selecionada
-  let selectedSku = '';
-  if (selectedVariantId && selectedVariantId !== 'null' && selectedVariantId !== '') {
-    // Encontrar a variante pelo shopify_variant_id
-    const variant = product.variants?.find(v => 
-      String(v.shopify_variant_id) === String(selectedVariantId)
-    );
-    selectedSku = variant?.sku || product.variants?.[0]?.sku || product.sku || '';
-  } else {
-    // Usar primeira variante
-    selectedSku = product.variants?.[0]?.sku || product.sku || '';
-  }
-
-  if (!selectedSku) {
-    console.warn('[CartFlow] No SKU for upsell:', product.title);
-    return;
-  }
-
-  // Buscar variant_id NA LOJA VITRINE pelo SKU
-  let vitrineVariantId = null;
-  try {
-    const res = await (window._cfOrigFetch || fetch)('/products.json?limit=250');
-    const data = await res.json();
-    for (const p of data.products) {
-      const v = p.variants.find(v => v.sku === selectedSku);
-      if (v) { vitrineVariantId = v.id; break; }
+    // Pegar SKU da variante selecionada
+    const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
+    const wrapper = card?.querySelector('[data-cf-selected-sku]');
+    let selectedSku = wrapper?.getAttribute('data-cf-selected-sku') || '';
+    if (!selectedSku || selectedSku === 'null') {
+      selectedSku = product.variants?.[0]?.sku || product.sku || '';
     }
-  } catch(e) {
-    console.warn('[CartFlow] Erro buscando variant na vitrine:', e);
-  }
+    if (!selectedSku) { console.warn('[CartFlow] No SKU for upsell:', product.title); return; }
 
-  if (!vitrineVariantId) {
-    console.warn('[CartFlow] Produto não encontrado na vitrine com SKU:', selectedSku);
-    return;
-  }
+    // Buscar variant_id na loja VITRINE (com cache)
+    const vitrineMap = await getVitrineSkuMap();
+    const vitrineVariantId = vitrineMap[selectedSku];
 
-  console.log('[CartFlow] Adicionando upsell:', selectedSku, '→', vitrineVariantId);
-
-  try {
-    const res = await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: [{ id: vitrineVariantId, quantity: 1 }] })
-    });
-    if (!res.ok) {
-      console.warn('[CartFlow] Failed:', await res.text());
+    if (!vitrineVariantId) {
+      console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku);
       return;
     }
-  } catch(e) {
-    console.warn('[CartFlow] Add error:', e);
-    return;
-  }
 
-  const cart = await fetchShopifyCart();
-  if (window._cfConfig) {
-    _lastSkus = '';
-    await fetchUpsells(cart);
-    renderCart(cart, window._cfConfig);
-    trackEvent('upsell_added', product.price || 0, { title: product.title, sku: selectedSku });
-  }
-};
+    console.log('[CartFlow] Adicionando upsell:', selectedSku, '→', vitrineVariantId);
+
+    try {
+      const res = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id: vitrineVariantId, quantity: 1 }] })
+      });
+      if (!res.ok) { console.warn('[CartFlow] Failed:', await res.text()); return; }
+    } catch(e) { console.warn('[CartFlow] Add error:', e); return; }
+
+    const cart = await fetchShopifyCart();
+    if (window._cfConfig) {
+      _lastSkus = '';
+      await fetchUpsells(cart);
+      renderCart(cart, window._cfConfig);
+      trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
+    }
+  };
 
   window.closeCart = closeCart;
 
   // ── Intercept ──
   function interceptCart() {
-    // Save original fetch before wrapping
     window._cfOrigFetch = window.fetch;
-
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
       const result = await window._cfOrigFetch.apply(window, args);
@@ -963,13 +726,11 @@ window.cfAddUpsell = async (productId) => {
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
             const cart = await fetchShopifyCart();
             if (_cartReady && window._cfConfig) {
-              _lastSkus = ''; // Force re-fetch upsells
+              _lastSkus = '';
               await fetchUpsells(cart);
               renderCart(cart, window._cfConfig);
               if (url.includes('/cart/add')) openCart();
-            } else if (url.includes('/cart/add')) {
-              _pendingOpen = true;
-            }
+            } else if (url.includes('/cart/add')) { _pendingOpen = true; }
           }
         } catch(e){}
       }
@@ -982,7 +743,8 @@ window.cfAddUpsell = async (productId) => {
       if (t.id==='cf-checkout'||t.closest('#cf-checkout')) {
         e.preventDefault();
         const btn = document.getElementById('cf-checkout');
-        if(!btn||btn.disabled)return; btn.disabled=true;
+        if(!btn||btn.disabled) return;
+        btn.disabled = true;
         const origHtml = btn.innerHTML;
         btn.innerHTML = 'Redirecting...';
         try { const cart=await fetchShopifyCart(); const url=await buildCheckoutUrl(cart.items,window._cfConfig); trackEvent('checkout',cart.total_price/100); window.location.href=url||'/checkout'; }
@@ -993,10 +755,7 @@ window.cfAddUpsell = async (productId) => {
       if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
         e.preventDefault(); e.stopPropagation();
         const cart=await fetchShopifyCart();
-        if(window._cfConfig) {
-          await fetchUpsells(cart);
-          renderCart(cart, window._cfConfig);
-        }
+        if(window._cfConfig) { await fetchUpsells(cart); renderCart(cart, window._cfConfig); }
         openCart();
       }
     }, true);
@@ -1004,29 +763,29 @@ window.cfAddUpsell = async (productId) => {
 
   // ── Init ──
   try {
-    // Fetch initial cart to get SKUs for upsells
     const initialCart = await fetchShopifyCart();
-    const initialSkus = (initialCart.items || []).map(i => i.sku).filter(Boolean).join(',');
+    const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
 
     const config = await getConfig(initialSkus);
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
+
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
     interceptCart();
 
+    // Pré-carregar vitrine SKU map em background
+    getVitrineSkuMap().then(() => console.log('[CartFlow] Vitrine map ready'));
+
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
-
-    // Render initial cart state
     renderCart(initialCart, config);
-
     onCartReady();
 
     trackEvent('cart_impression');
     console.log('[CartFlow] ✓ Loaded');
     console.log('[CartFlow] Store:', config.routing?.active_store?.name||'none');
-    console.log('[CartFlow] SKU map entries:', Object.keys(config.routing?.sku_map || {}).length);
+    console.log('[CartFlow] SKU map entries:', Object.keys(config.routing?.sku_map||{}).length);
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
