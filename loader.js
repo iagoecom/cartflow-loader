@@ -480,15 +480,24 @@
         itemsEl.innerHTML = items.map((item, idx) => {
 const lineTotal = item.price * item.quantity;
 const lineTotalDollars = lineTotal / 100;
-const compareAt = item.compare_at_price || 0;
-const useCompare = compareAt > 0 ? compareAt : item.price;
+
+// Busca compare_price do mapa retornado pelo config
+const comparePrices = config.compare_prices || {};
+const cpFromMap = comparePrices[item.sku];
+const useCompare = cpFromMap ? cpFromMap * 100 : item.price;
 const lineCompareDollars = (useCompare * item.quantity) / 100;
-const productSaving = lineCompareDollars > lineTotalDollars ? (lineCompareDollars - lineTotalDollars) : 0;
-const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
+
+const productSaving = lineCompareDollars > lineTotalDollars
+  ? (lineCompareDollars - lineTotalDollars) : 0;
+
+const itemShare = rawSubtotalDollars > 0
+  ? lineTotalDollars / rawSubtotalDollars : 0;
 const itemRewardDiscount = rewardDiscount * itemShare;
 const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
+
 const totalSavingsItem = productSaving + itemRewardDiscount;
-const hasDis = lineCompareDollars > lineTotalDollars || discountedTotal < lineTotalDollars;
+const hasDis = lineCompareDollars > lineTotalDollars
+  || discountedTotal < lineTotalDollars;
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
