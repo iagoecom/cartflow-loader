@@ -478,19 +478,17 @@
         const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
         const rawSubtotalDollars = rawSubtotalCents / 100;
         itemsEl.innerHTML = items.map((item, idx) => {
-          const lineTotal = item.price * item.quantity;
-          const lineTotalDollars = lineTotal / 100;
-          const lineCompare = (item.original_price||item.price) * item.quantity;
-          const lineCompareDollars = lineCompare / 100;
+const lineTotal = item.price * item.quantity;
+const lineTotalDollars = lineTotal / 100;
+const compareAt = item.compare_at_price || 0;
+const useCompare = compareAt > 0 ? compareAt : item.price;
+const lineCompareDollars = (useCompare * item.quantity) / 100;
+const productSaving = lineCompareDollars > lineTotalDollars ? (lineCompareDollars - lineTotalDollars) : 0;
 const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
 const itemRewardDiscount = rewardDiscount * itemShare;
 const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
-const hasShopifyDiscount = item.original_price > item.price;
-const shopifyDiscountAmount = (item.original_price - item.price) * item.quantity / 100;
-const hasDis = hasShopifyDiscount || lineCompareDollars > discountedTotal;
-const totalSavingsItem = hasShopifyDiscount 
-  ? shopifyDiscountAmount + itemRewardDiscount
-  : lineCompareDollars - discountedTotal;
+const totalSavingsItem = productSaving + itemRewardDiscount;
+const hasDis = lineCompareDollars > lineTotalDollars || discountedTotal < lineTotalDollars;
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
@@ -521,7 +519,7 @@ const totalSavingsItem = hasShopifyDiscount
                   </div>
                   <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
 ${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
-<span style="font-size:16px;font-weight:700">${formatPriceDollars(hasShopifyDiscount ? lineTotalDollars : discountedTotal)}</span>
+<span style="font-size:16px;font-weight:700">${formatPriceDollars(discountedTotal)}</span>
 ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.savings_color||'#22c55e'}">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
                   </div>
                 </div>
