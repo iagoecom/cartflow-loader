@@ -4,8 +4,6 @@
   const TOKEN = SCRIPT_TAG?.getAttribute('data-token');
   const API_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/config';
   const TRACK_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/track-event';
-  const SKU_CACHE_KEY = 'cartflow_sku_cache';
-  const SKU_TTL = 30 * 60 * 1000;
 
   if (!TOKEN) { console.warn('[CartFlow] data-token not found'); return; }
 
@@ -133,24 +131,6 @@
 
   async function fetchShopifyCart() { return (await (window._cfOrigFetch || fetch)('/cart.js')).json(); }
 
-  // ── SKU Map ──
-  async function getSkuMap(domain) {
-    const ck = `${SKU_CACHE_KEY}_${domain}`;
-    try { const c = localStorage.getItem(ck); if (c) { const {data,expiresAt}=JSON.parse(c); if (Date.now()<expiresAt) return data; } } catch(e){}
-    const m = {};
-    let url = `https://${domain}/products.json?limit=250`;
-    try {
-      while (url) {
-        const r = await fetch(url); if (!r.ok) break; const d = await r.json();
-        for (const p of d.products) for (const v of p.variants) if (v.sku) m[v.sku] = v.id;
-        const lh = r.headers.get('Link');
-        if (lh?.includes('rel="next"')) { const mt = lh.match(/<([^>]+)>;\s*rel="next"/); url = mt ? mt[1] : null; } else url = null;
-      }
-    } catch(e) { console.warn('[CartFlow] SKU map error:', e); }
-    try { localStorage.setItem(ck, JSON.stringify({ data:m, expiresAt:Date.now()+SKU_TTL })); } catch(e){}
-    return m;
-  }
-
   // ── Drawer Width ──
   function getDrawerWidth(v) {
     const dw = v.cart_width_desktop || 'default';
@@ -262,6 +242,28 @@
       #cart-notification,[id*="cart-drawer"],[class*="cart-drawer"],drawer-component[id*="cart"],
       .shopify-section-cart-drawer { display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
 
+      /* FIX #3: Reset all button styles to prevent Shopify theme inheritance */
+      #cf-checkout {
+        all: unset !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 8px !important;
+        border: none !important;
+        cursor: pointer !important;
+        text-transform: uppercase !important;
+        height: 46px !important;
+        font-size: 14px !important;
+        font-weight: 600 !important;
+        background: ${v.button_color||'#000'} !important;
+        color: ${v.button_text_color||'#fff'} !important;
+        border-radius: ${v.button_radius||0}px !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
+        transition: background-color 0.15s ease, opacity 0.15s ease !important;
+      }
+
       @media (max-width:480px) {
         #cf-drawer { width:${mw};right:-${mw}; }
       }
@@ -318,7 +320,7 @@
               <span style="font-weight:500">Subtotal:</span>
               <span id="cf-subtotal" style="font-weight:700"></span>
             </div>
-            <button id="cf-checkout" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:none;cursor:pointer;text-transform:uppercase;transition:all 0.15s;height:46px;font-size:14px;font-weight:600;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;box-shadow:0 4px 12px rgba(0,0,0,0.25);">
+            <button id="cf-checkout">
               ${SVG_ICONS.lock}
               Secure Checkout
             </button>
@@ -344,16 +346,20 @@
       };
     }
 
-    // Checkout button hover
+    // FIX #3: Checkout button hover — use !important to override theme styles
     const ckBtn = document.getElementById('cf-checkout');
     if (ckBtn) {
       ckBtn.onmouseenter = () => {
-        if (v.button_hover_color) ckBtn.style.backgroundColor = v.button_hover_color;
-        else ckBtn.style.opacity = '0.94';
+        if (v.button_hover_color) {
+          ckBtn.style.setProperty('background', v.button_hover_color, 'important');
+        } else {
+          ckBtn.style.setProperty('background', v.button_color || '#000', 'important');
+          ckBtn.style.setProperty('opacity', '0.9', 'important');
+        }
       };
       ckBtn.onmouseleave = () => {
-        ckBtn.style.backgroundColor = v.button_color || '#000';
-        ckBtn.style.opacity = '1';
+        ckBtn.style.setProperty('background', v.button_color || '#000', 'important');
+        ckBtn.style.setProperty('opacity', '1', 'important');
       };
     }
   }
@@ -507,17 +513,31 @@
           const totalSavingsItem = lineCompareDollars - discountedTotal;
 
           const hasDis = lineCompareDollars > discountedTotal;
-          const variantLabel = item.variant_title && item.variant_title !== 'Default Title' ? item.variant_title : '';
+
+          // FIX #1: Use product_title (without variant) instead of title
+          const productTitle = item.product_title || item.title;
+
+          // FIX #2: Build variant label with option names (Color: Black / Size: L)
+          let variantLabel = '';
+          if (item.options_with_values && item.options_with_values.length > 0) {
+            const meaningful = item.options_with_values.filter(o => o.value !== 'Default Title');
+            if (meaningful.length > 0) {
+              variantLabel = meaningful.map(o => `${o.name}: ${o.value}`).join(' / ');
+            }
+          } else if (item.variant_title && item.variant_title !== 'Default Title') {
+            variantLabel = item.variant_title;
+          }
+
           const borderBottom = idx < items.length - 1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
 
           return `
             <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
               <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center">
-                <img src="${item.image || item.featured_image?.url || '/placeholder.svg'}" alt="${item.title}" style="width:100%;height:100%;object-fit:cover" />
+                <img src="${item.image || item.featured_image?.url || '/placeholder.svg'}" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" />
               </div>
               <div style="flex:1;min-width:0">
                 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-                  <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;margin:0">${item.title}</p>
+                  <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;margin:0">${productTitle}</p>
                   <button onclick="cfQty('${item.key}',0)" style="flex-shrink:0;padding:2px;opacity:0.4;background:none;border:none;cursor:pointer;color:inherit;transition:opacity 0.15s" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">
                     ${SVG_ICONS.trash}
                   </button>
@@ -565,7 +585,7 @@
               const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
               return `
                 <div style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
-                  ${p.image_url ? `<img src="${p.image_url}" alt="${p.title}" style="width:80px;height:80px;border-radius:8px;flex-shrink:0;object-fit:cover" />` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
+                  ${p.image_url ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0"><img src="${p.image_url}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
                   <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
                     <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
@@ -739,28 +759,36 @@
     }
   }
 
-  // ── Checkout ──
+  // ── Checkout ── FIX #4: Use config.routing.sku_map directly instead of products.json
   async function buildCheckoutUrl(cartItems, config) {
     const domain = config.routing?.active_store?.domain;
     if (!domain) return null;
-    const skuMap = await getSkuMap(domain);
-    if (!skuMap || Object.keys(skuMap).length === 0) return null;
+
+    // FIX #4: Use the sku_map from config (populated from sku_maps table) instead of scraping products.json
+    const skuMap = config.routing?.sku_map || {};
+    if (Object.keys(skuMap).length === 0) {
+      console.warn('[CartFlow] No SKU map available for routing');
+      return null;
+    }
 
     const lines = [];
     for (const i of cartItems) {
       const vid = skuMap[i.sku];
       if (vid) lines.push(`${vid}:${i.quantity}`);
+      else console.warn(`[CartFlow] SKU not in map: ${i.sku}`);
     }
 
-    // Add addon items if active
+    // FIX #5: Add addon items using sku_map
     const v = config.visual || {};
     if (_spActive && v.sp_sku) {
       const vid = skuMap[v.sp_sku];
       if (vid) lines.push(`${vid}:1`);
+      else console.warn(`[CartFlow] SP SKU not in map: ${v.sp_sku}`);
     }
     if (_gwActive && v.gw_sku) {
       const vid = skuMap[v.gw_sku];
       if (vid) lines.push(`${vid}:1`);
+      else console.warn(`[CartFlow] GW SKU not in map: ${v.gw_sku}`);
     }
 
     if (lines.length === 0) return null;
@@ -889,12 +917,10 @@
 
     onCartReady();
 
-    const domain = config.routing?.active_store?.domain;
-    if (domain) getSkuMap(domain).then(m => console.log(`[CartFlow] SKU map: ${Object.keys(m).length}`));
-
     trackEvent('cart_impression');
     console.log('[CartFlow] ✓ Loaded');
     console.log('[CartFlow] Store:', config.routing?.active_store?.name||'none');
+    console.log('[CartFlow] SKU map entries:', Object.keys(config.routing?.sku_map || {}).length);
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
