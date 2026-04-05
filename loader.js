@@ -546,7 +546,7 @@
                   <div style="display:flex;flex-direction:column;gap:4px">
                     ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
                     <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px">
-                      <button onclick="cfQty('${item.key}',${item.quantity-1})" style="width:28px;height:26px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit">${SVG_ICONS.minus}</button>
+                      <button onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">
                       <span style="font-size:13px;width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25)">${item.quantity}</span>
                       <button onclick="cfQty('${item.key}',${item.quantity+1})" style="width:28px;height:26px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit">${SVG_ICONS.plus}</button>
                     </div>
