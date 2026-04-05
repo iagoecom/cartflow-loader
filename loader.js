@@ -800,33 +800,22 @@
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
       const result = await origFetch.apply(window, args);
-      if (url.includes('/cart/add') && !url.includes('track-event')) {
+      if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event')) {
         try {
-          const data = await result.clone().json();
-          if (data?.id || data?.items) {
+          const clone = await result.clone().json();
+          if (clone?.id || clone?.items || clone?.item_count !== undefined) {
             const cart = await fetchShopifyCart();
-            if (_cartReady && window._cfConfig) { renderCart(cart, window._cfConfig); openCart(); }
-            else _pendingOpen = true;
+            if (_cartReady && window._cfConfig) {
+              renderCart(cart, window._cfConfig);
+              if (url.includes('/cart/add')) openCart();
+            } else if (url.includes('/cart/add')) {
+              _pendingOpen = true;
+            }
           }
         } catch(e){}
       }
       return result;
     };
-
-    document.addEventListener('submit', async (e) => {
-      const form = e.target;
-      const isCart = form.action?.includes('/cart/add') || form.querySelector('[name="add"]');
-      if (!isCart) return;
-      e.preventDefault(); e.stopImmediatePropagation();
-      const btn = form.querySelector('[type="submit"],[name="add"]');
-      if (btn) { btn.disabled=true; btn.dataset.orig=btn.textContent; btn.textContent='Adding...'; }
-      try {
-        const fd = new FormData(form);
-        const res = await fetch('/cart/add.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:fd.get('id'),quantity:parseInt(fd.get('quantity')||'1')}) });
-        if (res.ok) { const cart=await fetchShopifyCart(); if(_cartReady&&window._cfConfig){renderCart(cart,window._cfConfig);openCart();}else _pendingOpen=true; }
-      } catch(e){ console.warn('[CartFlow] Add error:',e); }
-      finally { if(btn){btn.disabled=false;btn.textContent=btn.dataset.orig||'Add to cart';} }
-    }, true);
 
     document.addEventListener('click', async (e) => {
       const t = e.target;
