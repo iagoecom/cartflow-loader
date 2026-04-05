@@ -244,6 +244,14 @@
 
       /* FIX #3: Reset all button styles to prevent Shopify theme inheritance */
       #cf-checkout {
+      #cf-drawer button:not(#cf-checkout) {
+  all: unset !important;
+  box-sizing: border-box !important;
+  cursor: pointer !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
         all: unset !important;
         box-sizing: border-box !important;
         width: 100% !important;
