@@ -705,9 +705,7 @@
 
     const cart = await fetchShopifyCart();
     if (window._cfConfig) {
-      _lastSkus = '';
-      await fetchUpsells(cart);
-      renderCart(cart, window._cfConfig);
+renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
   };
@@ -767,9 +765,12 @@
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
 
-    const config = await getConfig(initialSkus);
-    if (!config) { console.warn('[CartFlow] Config not found'); return; }
-    window._cfConfig = config;
+const [config] = await Promise.all([
+  getConfig(initialSkus),
+  getVitrineSkuMap()
+]);
+if (!config) { console.warn('[CartFlow] Config not found'); return; }
+window._cfConfig = config;
 
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
