@@ -485,9 +485,9 @@
 const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
 const itemRewardDiscount = rewardDiscount * itemShare;
 const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
+const hasShopifyDiscount = item.original_price > item.price;
+const hasDis = hasShopifyDiscount || lineCompareDollars > discountedTotal;
 const totalSavingsItem = lineCompareDollars - discountedTotal;
-const hasDis = lineCompareDollars > discountedTotal;
-          const hasDis = lineCompareDollars > discountedTotal;
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
