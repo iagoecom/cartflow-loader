@@ -486,8 +486,11 @@ const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars
 const itemRewardDiscount = rewardDiscount * itemShare;
 const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
 const hasShopifyDiscount = item.original_price > item.price;
+const shopifyDiscountAmount = (item.original_price - item.price) * item.quantity / 100;
 const hasDis = hasShopifyDiscount || lineCompareDollars > discountedTotal;
-const totalSavingsItem = lineCompareDollars - discountedTotal;
+const totalSavingsItem = hasShopifyDiscount 
+  ? shopifyDiscountAmount + itemRewardDiscount
+  : lineCompareDollars - discountedTotal;
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
@@ -517,9 +520,9 @@ const totalSavingsItem = lineCompareDollars - discountedTotal;
                     </div>
                   </div>
                   <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
-                    ${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
-                    <span style="font-size:16px;font-weight:700">${formatPriceDollars(discountedTotal)}</span>
-                    ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.savings_color||'#22c55e'}">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
+${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
+<span style="font-size:16px;font-weight:700">${formatPriceDollars(hasShopifyDiscount ? lineTotalDollars : discountedTotal)}</span>
+${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.savings_color||'#22c55e'}">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
                   </div>
                 </div>
               </div>
