@@ -400,18 +400,23 @@
       });
     }
 
+    // Compute default values from first variant
+    const firstValues = (meaningful[0].option_value || '').split('/').map(val => val.trim());
+    const defaultShopifyId = meaningful[0]?.shopify_variant_id || '';
+
     let selectsHtml = '';
+    let idx = 0;
     for (const [name, valuesSet] of optionGroups) {
       const values = [...valuesSet];
-      const options = values.map(val => `<option value="${val}">${val}</option>`).join('');
-      selectsHtml += `<select data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option value="" disabled>${name}</option>${options}</select>`;
+      const defaultVal = firstValues[idx] || values[0];
+      const options = values.map(val =>
+        `<option value="${val}"${val === defaultVal ? ' selected' : ''}>${val}</option>`
+      ).join('');
+      selectsHtml += `<select data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:12px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};min-width:50px">${options}</select>`;
+      idx++;
     }
 
-    // Store first variant as default selection
-    const firstVariant = meaningful[0];
-    const defaultShopifyId = firstVariant?.shopify_variant_id || '';
-
-    return `<span data-cf-selected-variant="${defaultShopifyId}">${selectsHtml}</span>`;
+    return `<span data-cf-selected-variant="${defaultShopifyId}" style="display:flex;gap:6px;flex:1;min-width:0">${selectsHtml}</span>`;
   }
 
   // ── Render ──
