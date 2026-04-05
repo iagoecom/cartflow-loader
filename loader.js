@@ -874,62 +874,78 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
   };
 
   // ── Add Upsell (uses shopify_variant_id from variants) ──
-  window.cfAddUpsell = async (productId) => {
-    if (!productId) return;
-    const upsells = window._cfConfig?.upsells || [];
-    const product = upsells.find(p => p.id === productId);
-    if (!product) { console.warn('[CartFlow] Upsell product not found:', productId); return; }
+window.cfAddUpsell = async (productId) => {
+  if (!productId) return;
+  const upsells = window._cfConfig?.upsells || [];
+  const product = upsells.find(p => p.id === productId);
+  if (!product) { console.warn('[CartFlow] Upsell not found:', productId); return; }
 
-    // Find the selected variant wrapper
-    const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
-    const wrapper = card?.querySelector('[data-cf-selected-variant]');
-    let shopifyVariantId = wrapper?.getAttribute('data-cf-selected-variant') || '';
+  // Pegar variante selecionada no select
+  const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
+  const wrapper = card?.querySelector('[data-cf-selected-variant]');
+  const selectedVariantId = wrapper?.getAttribute('data-cf-selected-variant');
 
-    // If no shopify_variant_id from selects, try first variant
-    if (!shopifyVariantId && product.variants?.length > 0) {
-      shopifyVariantId = product.variants[0].shopify_variant_id || '';
-    }
-
-    // Fallback: use variant_id from product root
-if (!shopifyVariantId && product.variant_id) {
-  shopifyVariantId = product.variant_id;
-}
-
-// FALLBACK FINAL: usar SKU map da config
-if (!shopifyVariantId || shopifyVariantId === 'null') {
-  const skuMap = window._cfConfig?.routing?.sku_map || {};
-  const sku = product.sku || product.sku_base || '';
-  if (sku && skuMap[sku]) {
-    shopifyVariantId = String(skuMap[sku]);
-    console.log('[CartFlow] SKU map fallback:', sku, '→', shopifyVariantId);
+  // Pegar SKU da variante selecionada
+  let selectedSku = '';
+  if (selectedVariantId && selectedVariantId !== 'null' && selectedVariantId !== '') {
+    // Encontrar a variante pelo shopify_variant_id
+    const variant = product.variants?.find(v => 
+      String(v.shopify_variant_id) === String(selectedVariantId)
+    );
+    selectedSku = variant?.sku || product.variants?.[0]?.sku || product.sku || '';
+  } else {
+    // Usar primeira variante
+    selectedSku = product.variants?.[0]?.sku || product.sku || '';
   }
-}
 
-if (!shopifyVariantId || shopifyVariantId === 'null') {
-  console.warn('[CartFlow] No variant ID for upsell:', product.title, product);
-  return;
-}
+  if (!selectedSku) {
+    console.warn('[CartFlow] No SKU for upsell:', product.title);
+    return;
+  }
 
-    try {
-      const res = await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ id: Number(shopifyVariantId), quantity: 1 }] })
-      });
-      if (!res.ok) {
-        console.warn('[CartFlow] Failed to add upsell:', shopifyVariantId, await res.text());
-        return;
-      }
-    } catch(e) { console.warn('[CartFlow] Upsell add error:', e); return; }
-
-    const cart = await fetchShopifyCart();
-    if (window._cfConfig) {
-      _lastSkus = ''; // Force re-fetch
-      await fetchUpsells(cart);
-      renderCart(cart, window._cfConfig);
-      trackEvent('upsell_added', product.price || 0, { title: product.title, productId });
+  // Buscar variant_id NA LOJA VITRINE pelo SKU
+  let vitrineVariantId = null;
+  try {
+    const res = await (window._cfOrigFetch || fetch)('/products.json?limit=250');
+    const data = await res.json();
+    for (const p of data.products) {
+      const v = p.variants.find(v => v.sku === selectedSku);
+      if (v) { vitrineVariantId = v.id; break; }
     }
-  };
+  } catch(e) {
+    console.warn('[CartFlow] Erro buscando variant na vitrine:', e);
+  }
+
+  if (!vitrineVariantId) {
+    console.warn('[CartFlow] Produto não encontrado na vitrine com SKU:', selectedSku);
+    return;
+  }
+
+  console.log('[CartFlow] Adicionando upsell:', selectedSku, '→', vitrineVariantId);
+
+  try {
+    const res = await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ id: vitrineVariantId, quantity: 1 }] })
+    });
+    if (!res.ok) {
+      console.warn('[CartFlow] Failed:', await res.text());
+      return;
+    }
+  } catch(e) {
+    console.warn('[CartFlow] Add error:', e);
+    return;
+  }
+
+  const cart = await fetchShopifyCart();
+  if (window._cfConfig) {
+    _lastSkus = '';
+    await fetchUpsells(cart);
+    renderCart(cart, window._cfConfig);
+    trackEvent('upsell_added', product.price || 0, { title: product.title, sku: selectedSku });
+  }
+};
 
   window.closeCart = closeCart;
 
