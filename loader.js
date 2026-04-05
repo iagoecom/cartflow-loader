@@ -755,8 +755,8 @@ renderCart(cart, window._cfConfig);
       if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
         e.preventDefault(); e.stopPropagation();
         const cart=await fetchShopifyCart();
-        if(window._cfConfig) { await fetchUpsells(cart); renderCart(cart, window._cfConfig); }
-        openCart();
+        if(window._cfConfig) { renderCart(cart, window._cfConfig);
+openCart();
       }
     }, true);
   }
