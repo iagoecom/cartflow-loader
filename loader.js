@@ -487,7 +487,6 @@ const itemRewardDiscount = rewardDiscount * itemShare;
 const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
 const totalSavingsItem = lineCompareDollars - discountedTotal;
 const hasDis = lineCompareDollars > discountedTotal;
-const hasDis = hasShopifyDiscount || lineCompareDollars > discountedTotal;
           const hasDis = lineCompareDollars > discountedTotal;
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
