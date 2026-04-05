@@ -418,7 +418,7 @@
       const options = values.map(val =>
         `<option value="${val}"${val === defaultVal ? ' selected' : ''}>${val}</option>`
       ).join('');
-      selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};min-width:60px">${options}</select>`;
+selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0">${options}</select>`;
       idx++;
     }
 
@@ -901,7 +901,7 @@
     }
 
     try {
-      const res = await (window._cfOrigFetch || fetch)('/cart/add.js', {
+      const res = await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: [{ id: Number(shopifyVariantId), quantity: 1 }] })
@@ -931,7 +931,7 @@
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
       const result = await window._cfOrigFetch.apply(window, args);
-      if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config')) {
+      if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
         try {
           const clone = await result.clone().json();
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
