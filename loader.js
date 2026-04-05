@@ -531,47 +531,35 @@
           const borderBottom = idx < items.length - 1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
 
           return `
-  <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
-    <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5">
-      <img src="${item.image || item.featured_image?.url || '/placeholder.svg'}" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" />
-    </div>
-    <div style="flex:1;min-width:0">
-
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-        <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;margin:0">${productTitle}</p>
-        <button onclick="cfQty('${item.key}',0)" style="flex-shrink:0;padding:2px;opacity:0.4;background:none;border:none;cursor:pointer;color:inherit;transition:opacity 0.15s" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">
-          ${SVG_ICONS.trash}
-        </button>
-      </div>
-
-      ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:4px 0 0 0">${variantLabel}</p>` : ''}
-
-      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:8px">
-
-        <div style="display:flex;align-items:center;border:1px solid rgba(0,0,0,0.2);border-radius:6px;overflow:hidden;height:28px">
-          <button onclick="cfQty('${item.key}',${item.quantity-1})"
-            style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit;padding:0">
-            ${SVG_ICONS.minus}
-          </button>
-          <span style="font-size:13px;min-width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-left:1px solid rgba(0,0,0,0.2);border-right:1px solid rgba(0,0,0,0.2);padding:0 4px">
-            ${item.quantity}
-          </span>
-          <button onclick="cfQty('${item.key}',${item.quantity+1})"
-            style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit;padding:0">
-            ${SVG_ICONS.plus}
-          </button>
-        </div>
-
-        <div style="display:flex;flex-direction:column;align-items:flex-end">
-          ${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
-          <span style="font-size:16px;font-weight:700">${formatPriceDollars(discountedTotal)}</span>
-          ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.savings_color||'#22c55e'}">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
-        </div>
-
-      </div>
-    </div>
-  </div>
-`;
+            <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
+              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center">
+                <img src="${item.image || item.featured_image?.url || '/placeholder.svg'}" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" />
+              </div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+                  <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;margin:0">${productTitle}</p>
+                  <button onclick="cfQty('${item.key}',0)" style="flex-shrink:0;padding:2px;opacity:0.4;background:none;border:none;cursor:pointer;color:inherit;transition:opacity 0.15s" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">
+                    ${SVG_ICONS.trash}
+                  </button>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px">
+                  <div style="display:flex;flex-direction:column;gap:4px">
+                    ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
+                    <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px">
+                      <button onclick="cfQty('${item.key}',${item.quantity-1})" style="width:28px;height:26px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit">${SVG_ICONS.minus}</button>
+                      <span style="font-size:13px;width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25)">${item.quantity}</span>
+                      <button onclick="cfQty('${item.key}',${item.quantity+1})" style="width:28px;height:26px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit">${SVG_ICONS.plus}</button>
+                    </div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
+                    ${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
+                    <span style="font-size:16px;font-weight:700">${formatPriceDollars(discountedTotal)}</span>
+                    ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.savings_color||'#22c55e'}">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
         }).join('');
       }
     }
