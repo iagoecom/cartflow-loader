@@ -510,9 +510,9 @@
                   <div style="display:flex;flex-direction:column;gap:4px">
                     ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
                     <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px">
-                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit">${SVG_ICONS.minus}</span>
-                      <span style="font-size:13px;width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25)">${item.quantity}</span>
-                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit">${SVG_ICONS.plus}</span>
+<span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
+<span style="box-sizing:border-box;font-size:13px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
+<span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                     </div>
                   </div>
                   <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
