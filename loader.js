@@ -376,6 +376,44 @@
     document.body.style.overflow = '';
   }
 
+  // ── Build upsell variant selects ──
+  function buildUpsellVariantHtml(p, v) {
+    const variants = p.variants || [];
+    // Filter out single "Default Title" variant
+    const meaningful = variants.filter(vr => vr.option_value && vr.option_value !== 'Default Title');
+    if (meaningful.length === 0) {
+      // No meaningful variants — no select needed, use first variant's shopify_variant_id
+      const firstVariant = variants[0];
+      const shopifyId = firstVariant?.shopify_variant_id || '';
+      return `<span data-cf-selected-variant="${shopifyId}"></span>`;
+    }
+
+    // Group variants by option_name to create separate selects
+    // option_name can be "Color", "Size", or "Color / Size" (combined)
+    const optionGroups = new Map();
+    for (const vr of meaningful) {
+      const names = (vr.option_name || 'Option').split('/').map(n => n.trim());
+      const values = (vr.option_value || '').split('/').map(val => val.trim());
+      names.forEach((name, i) => {
+        if (!optionGroups.has(name)) optionGroups.set(name, new Set());
+        if (values[i]) optionGroups.get(name).add(values[i]);
+      });
+    }
+
+    let selectsHtml = '';
+    for (const [name, valuesSet] of optionGroups) {
+      const values = [...valuesSet];
+      const options = values.map(val => `<option value="${val}">${val}</option>`).join('');
+      selectsHtml += `<select data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option value="" disabled>${name}</option>${options}</select>`;
+    }
+
+    // Store first variant as default selection
+    const firstVariant = meaningful[0];
+    const defaultShopifyId = firstVariant?.shopify_variant_id || '';
+
+    return `<span data-cf-selected-variant="${defaultShopifyId}">${selectsHtml}</span>`;
+  }
+
   // ── Render ──
   function renderCart(cart, config) {
     const v = config.visual || {};
@@ -546,9 +584,9 @@
                   <div style="display:flex;flex-direction:column;gap:4px">
                     ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
                     <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px">
-                      <button onclick="cfQty('${item.key}',${item.quantity-1})" style="width:28px;height:26px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit">${SVG_ICONS.minus}</button>
+                      <span role="button" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit">${SVG_ICONS.minus}</span>
                       <span style="font-size:13px;width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25)">${item.quantity}</span>
-                      <button onclick="cfQty('${item.key}',${item.quantity+1})" style="width:28px;height:26px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit">${SVG_ICONS.plus}</button>
+                      <span role="button" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit">${SVG_ICONS.plus}</span>
                     </div>
                   </div>
                   <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
@@ -583,8 +621,10 @@
           <div style="display:flex;${isStack?'flex-direction:column;gap:12px':'gap:8px;overflow-x:auto'}">
             ${upsells.map(p => {
               const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
+              const enc = (s) => (s||'').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+              const variantSelectHtml = buildUpsellVariantHtml(p, v);
               return `
-                <div style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
+                <div class="cf-upsell-card" data-product-id="${p.id}" data-variants='${JSON.stringify(p.variants || [])}' style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
                   ${p.image_url ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0"><img src="${p.image_url}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
                   <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
@@ -593,8 +633,8 @@
                       <span style="font-size:12px;font-weight:600">${formatPriceDollars(p.price||0)}</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
-                      <select style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option>Default</option></select>
-                      <button onclick="cfAddUpsell('${p.sku||''}','${(p.title||'').replace(/'/g,"\\'")}',${p.price||0})" style="font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;border:none;cursor:pointer;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>
+                      ${variantSelectHtml}
+                      <button onclick="window.cfAddUpsell(this)" style="all:unset;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85;display:flex;align-items:center;justify-content:center;box-sizing:border-box">${v.upsells_button_text||'+Add'}</button>
                     </div>
                   </div>
                 </div>
@@ -826,20 +866,92 @@
     }
   };
 
-  window.cfAddUpsell = async (sku, title, price) => {
-    if (!sku) return;
+  // ── Update upsell variant selection when user changes a select ──
+  window.cfUpdateUpsellVariant = (selectEl) => {
+    const card = selectEl.closest('.cf-upsell-card');
+    if (!card) return;
+    const variants = JSON.parse(card.dataset.variants || '[]');
+    if (variants.length === 0) return;
+
+    // Read all selected option values from this card's selects
+    const selects = card.querySelectorAll('select[data-cf-option]');
+    const selectedValues = {};
+    selects.forEach(sel => { selectedValues[sel.dataset.cfOption] = sel.value; });
+
+    // Find the variant that matches all selected options
+    const matched = variants.find(vr => {
+      const names = (vr.option_name || '').split('/').map(n => n.trim());
+      const values = (vr.option_value || '').split('/').map(val => val.trim());
+      return names.every((name, i) => {
+        if (!selectedValues[name]) return true;
+        return values[i] === selectedValues[name];
+      });
+    });
+
+    // Update the hidden variant holder
+    const holder = card.querySelector('[data-cf-selected-variant]');
+    if (holder && matched) {
+      holder.dataset.cfSelectedVariant = matched.shopify_variant_id || '';
+    }
+
+    // Update displayed price if variant has its own price
+    if (matched && matched.price != null) {
+      const priceEl = card.querySelector('[data-cf-upsell-price]');
+      if (priceEl) priceEl.textContent = formatPriceDollars(matched.price);
+    }
+  };
+
+  // ── Add upsell to Shopify cart using shopify_variant_id ──
+  window.cfAddUpsell = async (btnEl) => {
+    const card = btnEl.closest('.cf-upsell-card');
+    if (!card) { console.warn('[CartFlow] No upsell card found'); return; }
+
+    // Get the selected shopify_variant_id
+    const holder = card.querySelector('[data-cf-selected-variant]');
+    let shopifyVariantId = holder?.dataset?.cfSelectedVariant || '';
+
+    // If no variant selected via selects, try first variant from data
+    if (!shopifyVariantId) {
+      const variants = JSON.parse(card.dataset.variants || '[]');
+      shopifyVariantId = variants[0]?.shopify_variant_id || '';
+    }
+
+    if (!shopifyVariantId) {
+      console.warn('[CartFlow] No shopify_variant_id found for upsell');
+      return;
+    }
+
+    const title = card.querySelector('p')?.textContent || '';
+    const numericId = Number(shopifyVariantId);
+
+    // Disable button during request
+    btnEl.style.opacity = '0.5';
+    btnEl.style.pointerEvents = 'none';
+
     try {
-      const res = await (window._cfOrigFetch || fetch)('/cart/add.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:[{id: sku, quantity:1}]}) });
+      const res = await (window._cfOrigFetch || fetch)('/cart/add.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id: numericId, quantity: 1 }] })
+      });
       if (!res.ok) {
-        console.warn('[CartFlow] Failed to add upsell:', sku);
+        console.warn('[CartFlow] Failed to add upsell, status:', res.status);
+        btnEl.style.opacity = '0.85';
+        btnEl.style.pointerEvents = '';
         return;
       }
-    } catch(e) { console.warn('[CartFlow] Upsell add error:', e); return; }
+    } catch(e) {
+      console.warn('[CartFlow] Upsell add error:', e);
+      btnEl.style.opacity = '0.85';
+      btnEl.style.pointerEvents = '';
+      return;
+    }
+
     const cart = await fetchShopifyCart();
     if (window._cfConfig) {
       await fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
-      trackEvent('upsell_added', price, {title, sku});
+      trackEvent('upsell_added', 0, { title, variant_id: shopifyVariantId });
     }
   };
 
