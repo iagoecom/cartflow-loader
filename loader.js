@@ -18,8 +18,12 @@
     _cartReady = true;
     if (_pendingOpen) {
       _pendingOpen = false;
-      fetchShopifyCart().then(cart => {
-        if (window._cfConfig) { renderCart(cart, window._cfConfig); openCart(); }
+      fetchShopifyCart().then(async cart => {
+        if (window._cfConfig) {
+          await fetchUpsells(cart);
+          renderCart(cart, window._cfConfig);
+          openCart();
+        }
       });
     }
   }
@@ -96,9 +100,8 @@
   };
 
   // ── Config ──
-  async function getConfig() {
+  async function getConfig(skus) {
     try {
-      const skus = getCartSkus();
       const url = `${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`;
       const r = await fetch(url);
       if (!r.ok) return null;
@@ -106,18 +109,29 @@
     } catch(e) { return null; }
   }
 
-  function getCartSkus() {
+  // ── Fetch upsells dynamically based on current cart SKUs ──
+  async function fetchUpsells(cart) {
+    const skus = (cart.items || []).map(i => i.sku).filter(Boolean).join(',');
+    if (!skus) {
+      if (window._cfConfig) window._cfConfig.upsells = [];
+      return;
+    }
     try {
-      const cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
-      return cartItems.map(i => i.sku).filter(Boolean).join(',');
-    } catch(e) { return ''; }
+      const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`);
+      if (r.ok) {
+        const data = await r.json();
+        if (window._cfConfig) window._cfConfig.upsells = data.upsells || [];
+      }
+    } catch(e) {
+      console.warn('[CartFlow] fetchUpsells error:', e);
+    }
   }
 
   function trackEvent(type, amount=0, metadata={}) {
-    fetch(TRACK_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:TOKEN, event_type:type, amount, metadata }) }).catch(()=>{});
+    (window._cfOrigFetch || fetch)(TRACK_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:TOKEN, event_type:type, amount, metadata }) }).catch(()=>{});
   }
 
-  async function fetchShopifyCart() { return (await fetch('/cart.js')).json(); }
+  async function fetchShopifyCart() { return (await (window._cfOrigFetch || fetch)('/cart.js')).json(); }
 
   // ── SKU Map ──
   async function getSkuMap(domain) {
@@ -176,10 +190,8 @@
 
   function updateTimerDisplay() {
     const v = window._cfConfig?.visual || {};
-    // Inline timer
     const inlineEl = document.getElementById('cf-timer-value');
     if (inlineEl) inlineEl.textContent = formatTimer(_timerSeconds);
-    // Block timer
     const blockEl = document.getElementById('cf-timer-blocks');
     if (blockEl) renderTimerBlocks(blockEl, v);
   }
@@ -489,7 +501,6 @@
           const lineTotalDollars = lineTotal / 100;
           const lineCompare = (item.original_price || item.price) * item.quantity;
           const lineCompareDollars = lineCompare / 100;
-          // Distribute reward discount proportionally
           const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
           const itemRewardDiscount = rewardDiscount * itemShare;
           const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
@@ -779,39 +790,48 @@
   // ── Global Functions ──
   window.cfQty = async (key, qty) => {
     if (qty < 0) return;
-    await fetch('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
+    await (window._cfOrigFetch || fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
     const cart = await fetchShopifyCart();
-    if (window._cfConfig) renderCart(cart, window._cfConfig);
+    if (window._cfConfig) {
+      await fetchUpsells(cart);
+      renderCart(cart, window._cfConfig);
+    }
   };
 
   window.cfAddUpsell = async (sku, title, price) => {
     if (!sku) return;
-    // Try to find variant id from current cart's store
     try {
-      const res = await fetch('/cart/add.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:[{id: sku, quantity:1}]}) });
+      const res = await (window._cfOrigFetch || fetch)('/cart/add.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:[{id: sku, quantity:1}]}) });
       if (!res.ok) {
         console.warn('[CartFlow] Failed to add upsell:', sku);
         return;
       }
     } catch(e) { console.warn('[CartFlow] Upsell add error:', e); return; }
     const cart = await fetchShopifyCart();
-    if (window._cfConfig) { renderCart(cart, window._cfConfig); trackEvent('upsell_added', price, {title, sku}); }
+    if (window._cfConfig) {
+      await fetchUpsells(cart);
+      renderCart(cart, window._cfConfig);
+      trackEvent('upsell_added', price, {title, sku});
+    }
   };
 
   window.closeCart = closeCart;
 
   // ── Intercept ──
   function interceptCart() {
-    const origFetch = window.fetch;
+    // Save original fetch before wrapping
+    window._cfOrigFetch = window.fetch;
+
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
-      const result = await origFetch.apply(window, args);
-      if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event')) {
+      const result = await window._cfOrigFetch.apply(window, args);
+      if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config')) {
         try {
           const clone = await result.clone().json();
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
             const cart = await fetchShopifyCart();
             if (_cartReady && window._cfConfig) {
+              await fetchUpsells(cart);
               renderCart(cart, window._cfConfig);
               if (url.includes('/cart/add')) openCart();
             } else if (url.includes('/cart/add')) {
@@ -839,14 +859,23 @@
       const triggers=['[href="/cart"]','.cart-icon-bubble','[data-cart-toggle]','.header__icon--cart','[aria-label="Cart"]','[aria-label="Open cart"]','.cart-count-bubble','#cart-icon-bubble'];
       if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
         e.preventDefault(); e.stopPropagation();
-        const cart=await fetchShopifyCart(); if(window._cfConfig) renderCart(cart,window._cfConfig); openCart();
+        const cart=await fetchShopifyCart();
+        if(window._cfConfig) {
+          await fetchUpsells(cart);
+          renderCart(cart, window._cfConfig);
+        }
+        openCart();
       }
     }, true);
   }
 
   // ── Init ──
   try {
-    const config = await getConfig();
+    // Fetch initial cart to get SKUs for upsells
+    const initialCart = await fetchShopifyCart();
+    const initialSkus = (initialCart.items || []).map(i => i.sku).filter(Boolean).join(',');
+
+    const config = await getConfig(initialSkus);
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
     injectStyles(config.visual||{});
@@ -854,6 +883,9 @@
     interceptCart();
 
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
+
+    // Render initial cart state
+    renderCart(initialCart, config);
 
     onCartReady();
 
