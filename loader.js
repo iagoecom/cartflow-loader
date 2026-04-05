@@ -546,7 +546,7 @@
                   <div style="display:flex;flex-direction:column;gap:4px">
                     ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
                     <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px">
-<div style="display:flex;align-items:center;border:1px solid rgba(0,0,0,0.2);border-radius:6px;overflow:hidden;width:fit-content;height:28px">
+               <div style="display:flex;align-items:center;border:1px solid rgba(0,0,0,0.2);border-radius:6px;overflow:hidden;width:fit-content;height:28px;margin-top:4px">
   <button onclick="cfQty('${item.key}',${item.quantity-1})" 
     style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit;padding:0">
     ${SVG_ICONS.minus}
@@ -558,8 +558,7 @@
     style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit;padding:0">
     ${SVG_ICONS.plus}
   </button>
-                    </div>
-                  </div>
+</div>
                   <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
                     ${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
                     <span style="font-size:16px;font-weight:700">${formatPriceDollars(discountedTotal)}</span>
