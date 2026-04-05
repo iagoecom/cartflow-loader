@@ -438,7 +438,7 @@
           ? (nextT.title_before || `Add {remaining} more to unlock ${nextT.reward_description||'the next reward'}`)
               .replace('{remaining}', String(rem)).replace('{{count}}', String(totalQty))
           : (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
-        const statusText = stripHtml(rawText);
+        const statusText = rawText; // Preserve HTML formatting (bold, italic, etc.)
 
         let barHtml = '<div style="display:flex;align-items:center;gap:0">';
         let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
@@ -691,8 +691,14 @@
     if (v.trust_badges_enabled) {
       const badgeSize = v.trust_badges_image_size ?? 100;
       let badgeHtml = '';
+      const PRESET_IMAGES = {
+        payment_icons: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/payment-icons-transparent.png',
+        returns_warranty: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/free-return-guarantee-transparent.png',
+      };
       if (v.trust_badges_image_url) {
         badgeHtml = `<div style="padding:6px 16px"><img src="${v.trust_badges_image_url}" alt="Badges" style="width:${badgeSize}%;max-width:100%;height:auto;object-fit:contain;display:block;margin:0 auto" /></div>`;
+      } else if (PRESET_IMAGES[v.trust_badges_preset]) {
+        badgeHtml = `<div style="padding:6px 16px"><img src="${PRESET_IMAGES[v.trust_badges_preset]}" alt="Badges" style="width:${badgeSize}%;max-width:100%;height:auto;object-fit:contain;display:block;margin:0 auto" /></div>`;
       } else if (v.trust_badges_preset) {
         const presetLabel = PRESETS[v.trust_badges_preset];
         if (presetLabel) {
