@@ -480,15 +480,17 @@
         itemsEl.innerHTML = items.map((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
-const compareAtPrice = item.compare_at_price || 0;
-const productComparePrice = compareAtPrice > 0 ? compareAtPrice : item.price;
-const lineCompare = productComparePrice * item.quantity;
-const lineCompareDollars = lineCompare / 100;
-// ...
-const productSaving = Math.max(0, lineCompareDollars - lineTotalDollars);
-const rewardSaving = Math.max(0, lineTotalDollars - discountedTotal);
-const totalSavingsItem = productSaving + rewardSaving;
-const showStrikethrough = lineCompareDollars > lineTotalDollars || discountedTotal < lineTotalDollars;
+          const lineCompare = (item.original_price||item.price) * item.quantity;
+          const lineCompareDollars = lineCompare / 100;
+const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
+const itemRewardDiscount = rewardDiscount * itemShare;
+const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
+const hasShopifyDiscount = item.original_price > item.price;
+const shopifyDiscountAmount = (item.original_price - item.price) * item.quantity / 100;
+const hasDis = hasShopifyDiscount || lineCompareDollars > discountedTotal;
+const totalSavingsItem = hasShopifyDiscount 
+  ? shopifyDiscountAmount + itemRewardDiscount
+  : lineCompareDollars - discountedTotal;
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
