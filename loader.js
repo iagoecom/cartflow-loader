@@ -11,6 +11,7 @@
   let _pendingOpen = false;
   let _spActive = false;
   let _gwActive = false;
+  let _lastSkus = ''; // SKU cache for fetchUpsells
 
   function onCartReady() {
     _cartReady = true;
@@ -107,13 +108,17 @@
     } catch(e) { return null; }
   }
 
-  // ── Fetch upsells dynamically based on current cart SKUs ──
+  // ── Fetch upsells dynamically based on current cart SKUs (with cache) ──
   async function fetchUpsells(cart) {
     const skus = (cart.items || []).map(i => i.sku).filter(Boolean).join(',');
     if (!skus) {
       if (window._cfConfig) window._cfConfig.upsells = [];
+      _lastSkus = '';
       return;
     }
+    // Skip if SKUs haven't changed
+    if (skus === _lastSkus) return;
+    _lastSkus = skus;
     try {
       const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`);
       if (r.ok) {
@@ -353,8 +358,7 @@
         if (v.button_hover_color) {
           ckBtn.style.setProperty('background', v.button_hover_color, 'important');
         } else {
-          ckBtn.style.setProperty('background', v.button_color || '#000', 'important');
-          ckBtn.style.setProperty('opacity', '0.9', 'important');
+          ckBtn.style.setProperty('opacity', '0.85', 'important');
         }
       };
       ckBtn.onmouseleave = () => {
@@ -376,33 +380,35 @@
     document.body.style.overflow = '';
   }
 
-  // ── Build upsell variant selects ──
-  function buildUpsellVariantHtml(p, v) {
-    const variants = p.variants || [];
-    // Filter out single "Default Title" variant
-    const meaningful = variants.filter(vr => vr.option_value && vr.option_value !== 'Default Title');
+  // ── Build upsell variant selects HTML ──
+  function buildUpsellVariantHtml(product, v) {
+    const variants = product.variants || [];
+    // Filter meaningful variants (not "Default Title")
+    const meaningful = variants.filter(vr =>
+      vr.option_value && vr.option_value !== 'Default Title' && vr.option_value.trim() !== ''
+    );
+
     if (meaningful.length === 0) {
-      // No meaningful variants — no select needed, use first variant's shopify_variant_id
-      const firstVariant = variants[0];
-      const shopifyId = firstVariant?.shopify_variant_id || '';
-      return `<span data-cf-selected-variant="${shopifyId}"></span>`;
+      // No meaningful variants — show single "Default" select
+      return `<span data-cf-product-id="${product.id}" data-cf-selected-variant="${variants[0]?.shopify_variant_id || ''}" style="display:flex;gap:8px;flex:1;min-width:0"><select class="cf-upsell-select" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option>Default</option></select></span>`;
     }
 
-    // Group variants by option_name to create separate selects
-    // option_name can be "Color", "Size", or "Color / Size" (combined)
+    // Group options by option_name
+    // option_value format: "Black" or "Black / M" (name1_val / name2_val)
     const optionGroups = new Map();
     for (const vr of meaningful) {
-      const names = (vr.option_name || 'Option').split('/').map(n => n.trim());
-      const values = (vr.option_value || '').split('/').map(val => val.trim());
-      names.forEach((name, i) => {
-        if (!optionGroups.has(name)) optionGroups.set(name, new Set());
-        if (values[i]) optionGroups.get(name).add(values[i]);
+      const parts = (vr.option_value || '').split('/').map(p => p.trim());
+      const name = vr.option_name || 'Option';
+      const names = name.split('/').map(n => n.trim());
+      names.forEach((n, idx) => {
+        if (!optionGroups.has(n)) optionGroups.set(n, new Set());
+        if (parts[idx]) optionGroups.get(n).add(parts[idx]);
       });
     }
 
-    // Compute default values from first variant
+    // Default values from first variant
     const firstValues = (meaningful[0].option_value || '').split('/').map(val => val.trim());
-    const defaultShopifyId = meaningful[0]?.shopify_variant_id || '';
+    const defaultShopifyId = meaningful[0].shopify_variant_id || variants[0]?.shopify_variant_id || '';
 
     let selectsHtml = '';
     let idx = 0;
@@ -412,12 +418,39 @@
       const options = values.map(val =>
         `<option value="${val}"${val === defaultVal ? ' selected' : ''}>${val}</option>`
       ).join('');
-      selectsHtml += `<select data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:12px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};min-width:50px">${options}</select>`;
+      selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};min-width:60px">${options}</select>`;
       idx++;
     }
 
-    return `<span data-cf-selected-variant="${defaultShopifyId}" style="display:flex;gap:6px;flex:1;min-width:0">${selectsHtml}</span>`;
+    return `<span data-cf-product-id="${product.id}" data-cf-selected-variant="${defaultShopifyId}" style="display:flex;gap:8px;flex:1;min-width:0">${selectsHtml}</span>`;
   }
+
+  // ── Update upsell variant when select changes ──
+  window.cfUpdateUpsellVariant = function(selectEl) {
+    const wrapper = selectEl.closest('[data-cf-product-id]');
+    if (!wrapper) return;
+    const productId = wrapper.getAttribute('data-cf-product-id');
+    const upsells = window._cfConfig?.upsells || [];
+    const product = upsells.find(p => p.id === productId);
+    if (!product) return;
+
+    // Read all selected values from the wrapper's selects
+    const selects = wrapper.querySelectorAll('select[data-cf-option]');
+    const selectedValues = [];
+    selects.forEach(s => selectedValues.push(s.value));
+    const selectedKey = selectedValues.join(' / ');
+
+    // Find matching variant
+    const variants = product.variants || [];
+    const match = variants.find(vr => {
+      const vrKey = (vr.option_value || '').split('/').map(p => p.trim()).join(' / ');
+      return vrKey === selectedKey;
+    });
+
+    if (match && match.shopify_variant_id) {
+      wrapper.setAttribute('data-cf-selected-variant', match.shopify_variant_id);
+    }
+  };
 
   // ── Render ──
   function renderCart(cart, config) {
@@ -499,7 +532,7 @@
           ? (nextT.title_before || `Add {remaining} more to unlock ${nextT.reward_description||'the next reward'}`)
               .replace('{remaining}', String(rem)).replace('{{count}}', String(totalQty))
           : (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
-        const statusText = rawText; // Preserve HTML formatting (bold, italic, etc.)
+        const statusText = rawText;
 
         let barHtml = '<div style="display:flex;align-items:center;gap:0">';
         let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
@@ -557,10 +590,8 @@
 
           const hasDis = lineCompareDollars > discountedTotal;
 
-          // FIX #1: Use product_title (without variant) instead of title
           const productTitle = item.product_title || item.title;
 
-          // FIX #2: Build variant label with option names (Color: Black / Size: L)
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
             const meaningful = item.options_with_values.filter(o => o.value !== 'Default Title');
@@ -581,17 +612,17 @@
               <div style="flex:1;min-width:0">
                 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
                   <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;margin:0">${productTitle}</p>
-                  <button onclick="cfQty('${item.key}',0)" style="flex-shrink:0;padding:2px;opacity:0.4;background:none;border:none;cursor:pointer;color:inherit;transition:opacity 0.15s" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">
+                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;flex-shrink:0;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">
                     ${SVG_ICONS.trash}
-                  </button>
+                  </span>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px">
                   <div style="display:flex;flex-direction:column;gap:4px">
                     ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
                     <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px">
-                      <span role="button" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit">${SVG_ICONS.minus}</span>
+                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit">${SVG_ICONS.minus}</span>
                       <span style="font-size:13px;width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25)">${item.quantity}</span>
-                      <span role="button" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit">${SVG_ICONS.plus}</span>
+                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit">${SVG_ICONS.plus}</span>
                     </div>
                   </div>
                   <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
@@ -626,10 +657,9 @@
           <div style="display:flex;${isStack?'flex-direction:column;gap:12px':'gap:8px;overflow-x:auto'}">
             ${upsells.map(p => {
               const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
-              const enc = (s) => (s||'').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-              const variantSelectHtml = buildUpsellVariantHtml(p, v);
+              const variantSelectsHtml = buildUpsellVariantHtml(p, v);
               return `
-                <div class="cf-upsell-card" data-product-id="${p.id}" data-variants='${JSON.stringify(p.variants || [])}' style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
+                <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
                   ${p.image_url ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0"><img src="${p.image_url}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
                   <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
@@ -637,9 +667,9 @@
                       ${hasCompare ? `<span style="font-size:12px;text-decoration:line-through;opacity:0.5">${formatPriceDollars(p.compare_price)}</span>` : ''}
                       <span style="font-size:12px;font-weight:600">${formatPriceDollars(p.price||0)}</span>
                     </div>
-                    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
-                      ${variantSelectHtml}
-                      <button onclick="window.cfAddUpsell(this)" style="all:unset;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85;display:flex;align-items:center;justify-content:center;box-sizing:border-box">${v.upsells_button_text||'+Add'}</button>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+                      ${variantSelectsHtml}
+                      <button onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>
                     </div>
                   </div>
                 </div>
@@ -708,150 +738,121 @@
           </div>
         `;
       }
-      addonEl.innerHTML = addonHtml;
-    }
-
-    // ── Footer ──
-    const footerEl = document.getElementById('cf-footer');
-    if (footerEl) {
-      footerEl.style.backgroundColor = accentColor;
-      footerEl.style.color = accentTextColor;
-    }
-
-    // ── Discounts row ──
-    const discRow = document.getElementById('cf-discounts-row');
-    const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
-    const rawSubtotalDollars = rawSubtotalCents / 100;
-    const productSavings = items.reduce((a,i) => a + Math.max((i.original_price||i.price) - i.price, 0) * i.quantity, 0) / 100;
-    const totalSavings = productSavings + rewardDiscount;
-
-    if (discRow) {
-      if (v.show_strikethrough && totalSavings > 0) {
-        let badgesHtml = activeRewardLabels.map(label =>
-          `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${v.text_color||'#000'}">${label}</span>`
-        ).join('');
-        discRow.innerHTML = `
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <span style="color:${v.savings_color||'#22c55e'};font-weight:500">Discounts</span>
-            ${badgesHtml}
-          </div>
-          <span style="color:${v.savings_color||'#22c55e'};font-weight:600;white-space:nowrap">- ${formatPriceDollars(totalSavings)}</span>
-        `;
-        discRow.style.display = 'flex';
-      } else {
-        discRow.style.display = 'none';
-      }
-    }
-
-    // ── Subtotal ──
-    const addonTotal = (_spActive ? Number(v.sp_price || 4.99) : 0) + (_gwActive ? Number(v.gift_wrap_price || 2.99) : 0);
-    const subtotal = Math.max(0, rawSubtotalDollars - rewardDiscount) + addonTotal;
-
-    const subRow = document.getElementById('cf-subtotal-row');
-    const subEl = document.getElementById('cf-subtotal');
-    if (v.show_subtotal_line !== false) {
-      if (subRow) {
-        subRow.style.display = 'flex';
-        if (v.subtotal_text_color) subRow.style.color = v.subtotal_text_color;
-      }
-      if (subEl) subEl.textContent = formatPriceDollars(subtotal);
-    } else {
-      if (subRow) subRow.style.display = 'none';
+      if (addonHtml) addonEl.innerHTML = addonHtml;
     }
 
     // ── Trust badges ──
-    const badgesTopEl = document.getElementById('cf-badges-top');
-    const badgesBtmEl = document.getElementById('cf-badges-bottom');
-    if (badgesTopEl) badgesTopEl.innerHTML = '';
-    if (badgesBtmEl) badgesBtmEl.innerHTML = '';
+    const badgesTop = document.getElementById('cf-badges-top');
+    const badgesBot = document.getElementById('cf-badges-bottom');
+    if (badgesTop) badgesTop.innerHTML = '';
+    if (badgesBot) badgesBot.innerHTML = '';
     if (v.trust_badges_enabled) {
-      const badgeSize = v.trust_badges_image_size ?? 100;
+      const preset = v.trust_badges_preset || 'returns_warranty';
+      const badgeText = PRESETS[preset] || '';
+      const badgeImgUrl = v.trust_badges_image_url || '';
+      const badgeSize = v.trust_badges_image_size || 40;
+      const badgePos = v.trust_badges_position || 'below';
       let badgeHtml = '';
-      const PRESET_IMAGES = {
-        payment_icons: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/payment-icons-transparent.png',
-        returns_warranty: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/free-return-guarantee-transparent.png',
-      };
-      if (v.trust_badges_image_url) {
-        badgeHtml = `<div style="padding:6px 16px"><img src="${v.trust_badges_image_url}" alt="Badges" style="width:${badgeSize}%;max-width:100%;height:auto;object-fit:contain;display:block;margin:0 auto" /></div>`;
-      } else if (PRESET_IMAGES[v.trust_badges_preset]) {
-        badgeHtml = `<div style="padding:6px 16px"><img src="${PRESET_IMAGES[v.trust_badges_preset]}" alt="Badges" style="width:${badgeSize}%;max-width:100%;height:auto;object-fit:contain;display:block;margin:0 auto" /></div>`;
-      } else if (v.trust_badges_preset) {
-        const presetLabel = PRESETS[v.trust_badges_preset];
-        if (presetLabel) {
-          badgeHtml = `<div style="padding:6px 16px"><div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:4px 0;font-size:9px;opacity:0.5">${SVG_ICONS.shield} ${presetLabel}</div></div>`;
-        }
+      if (badgeImgUrl) {
+        badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${badgeImgUrl}" alt="Trust Badge" style="max-height:${badgeSize}px;max-width:100%;object-fit:contain" /></div>`;
+      } else if (badgeText) {
+        badgeHtml = `<div style="text-align:center;padding:8px 16px;font-size:11px;opacity:0.6">${SVG_ICONS.shield} ${badgeText}</div>`;
       }
-      if (badgeHtml) {
-        const tgt = (v.trust_badges_position||'bottom') === 'top' ? badgesTopEl : badgesBtmEl;
-        if (tgt) tgt.innerHTML = badgeHtml;
+      const target = badgePos === 'above' ? badgesTop : badgesBot;
+      if (target && badgeHtml) target.innerHTML = badgeHtml;
+    }
+
+    // ── Subtotal ──
+    const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
+    const rawSubtotalDollars = rawSubtotalCents / 100;
+    let addonTotal = 0;
+    if (_spActive && v.shipping_protection_enabled) {
+      const spPrice = Number(v.sp_price || 4.99);
+      addonTotal += v.sp_price_type === 'percentage' ? rawSubtotalDollars * spPrice / 100 : spPrice;
+    }
+    if (_gwActive && v.gift_wrap_enabled) addonTotal += Number(v.gift_wrap_price || 2.99);
+    const finalSubtotal = Math.max(0, rawSubtotalDollars - rewardDiscount + addonTotal);
+
+    const subtotalEl = document.getElementById('cf-subtotal');
+    if (subtotalEl) subtotalEl.textContent = formatPriceDollars(finalSubtotal);
+
+    // Discount row
+    const discRow = document.getElementById('cf-discounts-row');
+    if (discRow) {
+      if (rewardDiscount > 0 && activeRewardLabels.length > 0) {
+        discRow.style.display = 'flex';
+        discRow.innerHTML = `<span style="color:${v.savings_color||'#22c55e'};font-weight:500">${activeRewardLabels.join(' + ')}</span><span style="color:${v.savings_color||'#22c55e'};font-weight:600">-${formatPriceDollars(rewardDiscount)}</span>`;
+      } else {
+        discRow.style.display = 'none';
+        discRow.innerHTML = '';
       }
     }
 
-    // ── Continue shopping ──
+    // Subtotal row visibility
+    const subtotalRow = document.getElementById('cf-subtotal-row');
+    if (subtotalRow) subtotalRow.style.display = v.show_subtotal_line === false ? 'none' : 'flex';
+
+    // Continue Shopping
     const contWrap = document.getElementById('cf-continue-wrap');
     if (contWrap) {
-      contWrap.innerHTML = v.show_continue_shopping
-        ? `<button onclick="closeCart()" style="width:100%;padding:8px;background:none;border:none;cursor:pointer;font-size:12px;text-decoration:underline;opacity:0.5;color:${v.text_color||'#000'};transition:opacity 0.15s" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.5'">Or continue shopping</button>`
-        : '';
-    }
-
-    // ── Express payments ──
-    const expWrap = document.getElementById('cf-express-wrap');
-    if (expWrap) {
-      expWrap.innerHTML = v.express_payments_enabled
-        ? `<div style="display:flex;justify-content:center;gap:8px;padding-top:4px">${['Apple Pay','G Pay','PayPal'].map(m => `<div style="font-size:9px;padding:4px 12px;border-radius:4px;border:1px solid rgba(0,0,0,0.12);opacity:0.4">${m}</div>`).join('')}</div>`
-        : '';
+      contWrap.innerHTML = '';
+      if (v.show_continue_shopping) {
+        contWrap.innerHTML = `<button onclick="closeCart()" style="all:unset;box-sizing:border-box;width:100%;display:block;text-align:center;font-size:13px;margin-top:8px;cursor:pointer;opacity:0.6;text-decoration:underline">Continue Shopping</button>`;
+      }
     }
   }
 
-  // ── Checkout ── FIX #4: Use config.routing.sku_map directly instead of products.json
+  // ── Checkout URL ──
   async function buildCheckoutUrl(cartItems, config) {
-    const domain = config.routing?.active_store?.domain;
-    if (!domain) return null;
+    const routing = config?.routing || {};
+    const skuMap = routing.sku_map || {};
+    const activeDomain = routing.active_store?.domain;
+    const v = config?.visual || {};
 
-    // FIX #4: Use the sku_map from config (populated from sku_maps table) instead of scraping products.json
-    const skuMap = config.routing?.sku_map || {};
-    if (Object.keys(skuMap).length === 0) {
-      console.warn('[CartFlow] No SKU map available for routing');
-      return null;
+    if (!activeDomain) return '/checkout';
+
+    const lineItems = [];
+    for (const item of cartItems) {
+      const mappedId = skuMap[item.sku];
+      if (mappedId) lineItems.push(`${mappedId}:${item.quantity}`);
     }
 
-    const lines = [];
-    for (const i of cartItems) {
-      const vid = skuMap[i.sku];
-      if (vid) lines.push(`${vid}:${i.quantity}`);
-      else console.warn(`[CartFlow] SKU not in map: ${i.sku}`);
-    }
-
-    // FIX #5: Add addon items using sku_map
-    const v = config.visual || {};
+    // Add SP addon
     if (_spActive && v.sp_sku) {
-      const vid = skuMap[v.sp_sku];
-      if (vid) lines.push(`${vid}:1`);
-      else console.warn(`[CartFlow] SP SKU not in map: ${v.sp_sku}`);
+      const mappedSp = skuMap[v.sp_sku];
+      if (mappedSp) lineItems.push(`${mappedSp}:1`);
     }
+    // Add GW addon
     if (_gwActive && v.gw_sku) {
-      const vid = skuMap[v.gw_sku];
-      if (vid) lines.push(`${vid}:1`);
-      else console.warn(`[CartFlow] GW SKU not in map: ${v.gw_sku}`);
+      const mappedGw = skuMap[v.gw_sku];
+      if (mappedGw) lineItems.push(`${mappedGw}:1`);
     }
 
-    if (lines.length === 0) return null;
+    if (lineItems.length === 0) return '/checkout';
 
-    // Build URL with discount code if available
-    let url = `https://${domain}/cart/${lines.join(',')}`;
+    let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(',')}`;
 
-    // Apply shopify coupon from unlocked reward tiers
-    const rewards = config.rewards || [];
+    // Apply active reward coupon
+    const tiers = config.rewards || [];
+    const vConfig = config.visual || {};
+    const isQty = (vConfig.rewards_calculation || 'cart_total') === 'quantity';
+    const totalQty = cartItems.reduce((a,i) => a + i.quantity, 0);
     const totalValue = cartItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
-    const unlockedTiers = rewards.filter(t => totalValue >= t.minimum_value);
-    const coupon = unlockedTiers.map(t => t.shopify_coupon).filter(Boolean).pop();
-    if (coupon) url += `?discount=${encodeURIComponent(coupon)}`;
+    const simValue = isQty ? totalQty : totalValue;
+    const sorted = [...tiers].sort((a,b) => a.minimum_value - b.minimum_value);
+    const unlockedTiers = sorted.filter(t => simValue >= t.minimum_value);
 
-    return url;
+    if (unlockedTiers.length > 0) {
+      const bestCouponTier = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
+      if (bestCouponTier?.shopify_coupon) {
+        checkoutUrl += `?discount=${encodeURIComponent(bestCouponTier.shopify_coupon)}`;
+      }
+    }
+
+    return checkoutUrl;
   }
 
-  // ── Toggle Addon ──
+  // ── Addon Toggle ──
   window.cfToggleAddon = (type) => {
     if (type === 'sp') _spActive = !_spActive;
     if (type === 'gw') _gwActive = !_gwActive;
@@ -866,97 +867,57 @@
     await (window._cfOrigFetch || fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
     const cart = await fetchShopifyCart();
     if (window._cfConfig) {
+      _lastSkus = ''; // Force re-fetch upsells after qty change
       await fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
     }
   };
 
-  // ── Update upsell variant selection when user changes a select ──
-  window.cfUpdateUpsellVariant = (selectEl) => {
-    const card = selectEl.closest('.cf-upsell-card');
-    if (!card) return;
-    const variants = JSON.parse(card.dataset.variants || '[]');
-    if (variants.length === 0) return;
+  // ── Add Upsell (uses shopify_variant_id from variants) ──
+  window.cfAddUpsell = async (productId) => {
+    if (!productId) return;
+    const upsells = window._cfConfig?.upsells || [];
+    const product = upsells.find(p => p.id === productId);
+    if (!product) { console.warn('[CartFlow] Upsell product not found:', productId); return; }
 
-    // Read all selected option values from this card's selects
-    const selects = card.querySelectorAll('select[data-cf-option]');
-    const selectedValues = {};
-    selects.forEach(sel => { selectedValues[sel.dataset.cfOption] = sel.value; });
+    // Find the selected variant wrapper
+    const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
+    const wrapper = card?.querySelector('[data-cf-selected-variant]');
+    let shopifyVariantId = wrapper?.getAttribute('data-cf-selected-variant') || '';
 
-    // Find the variant that matches all selected options
-    const matched = variants.find(vr => {
-      const names = (vr.option_name || '').split('/').map(n => n.trim());
-      const values = (vr.option_value || '').split('/').map(val => val.trim());
-      return names.every((name, i) => {
-        if (!selectedValues[name]) return true;
-        return values[i] === selectedValues[name];
-      });
-    });
-
-    // Update the hidden variant holder
-    const holder = card.querySelector('[data-cf-selected-variant]');
-    if (holder && matched) {
-      holder.dataset.cfSelectedVariant = matched.shopify_variant_id || '';
+    // If no shopify_variant_id from selects, try first variant
+    if (!shopifyVariantId && product.variants?.length > 0) {
+      shopifyVariantId = product.variants[0].shopify_variant_id || '';
     }
 
-    // Update displayed price if variant has its own price
-    if (matched && matched.price != null) {
-      const priceEl = card.querySelector('[data-cf-upsell-price]');
-      if (priceEl) priceEl.textContent = formatPriceDollars(matched.price);
-    }
-  };
-
-  // ── Add upsell to Shopify cart using shopify_variant_id ──
-  window.cfAddUpsell = async (btnEl) => {
-    const card = btnEl.closest('.cf-upsell-card');
-    if (!card) { console.warn('[CartFlow] No upsell card found'); return; }
-
-    // Get the selected shopify_variant_id
-    const holder = card.querySelector('[data-cf-selected-variant]');
-    let shopifyVariantId = holder?.dataset?.cfSelectedVariant || '';
-
-    // If no variant selected via selects, try first variant from data
-    if (!shopifyVariantId) {
-      const variants = JSON.parse(card.dataset.variants || '[]');
-      shopifyVariantId = variants[0]?.shopify_variant_id || '';
+    // Fallback: use variant_id from product root
+    if (!shopifyVariantId && product.variant_id) {
+      shopifyVariantId = product.variant_id;
     }
 
     if (!shopifyVariantId) {
-      console.warn('[CartFlow] No shopify_variant_id found for upsell');
+      console.warn('[CartFlow] No shopify_variant_id for upsell:', productId);
       return;
     }
-
-    const title = card.querySelector('p')?.textContent || '';
-    const numericId = Number(shopifyVariantId);
-
-    // Disable button during request
-    btnEl.style.opacity = '0.5';
-    btnEl.style.pointerEvents = 'none';
 
     try {
       const res = await (window._cfOrigFetch || fetch)('/cart/add.js', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ id: numericId, quantity: 1 }] })
+        body: JSON.stringify({ items: [{ id: Number(shopifyVariantId), quantity: 1 }] })
       });
       if (!res.ok) {
-        console.warn('[CartFlow] Failed to add upsell, status:', res.status);
-        btnEl.style.opacity = '0.85';
-        btnEl.style.pointerEvents = '';
+        console.warn('[CartFlow] Failed to add upsell:', shopifyVariantId, await res.text());
         return;
       }
-    } catch(e) {
-      console.warn('[CartFlow] Upsell add error:', e);
-      btnEl.style.opacity = '0.85';
-      btnEl.style.pointerEvents = '';
-      return;
-    }
+    } catch(e) { console.warn('[CartFlow] Upsell add error:', e); return; }
 
     const cart = await fetchShopifyCart();
     if (window._cfConfig) {
+      _lastSkus = ''; // Force re-fetch
       await fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
-      trackEvent('upsell_added', 0, { title, variant_id: shopifyVariantId });
+      trackEvent('upsell_added', product.price || 0, { title: product.title, productId });
     }
   };
 
@@ -976,6 +937,7 @@
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
             const cart = await fetchShopifyCart();
             if (_cartReady && window._cfConfig) {
+              _lastSkus = ''; // Force re-fetch upsells
               await fetchUpsells(cart);
               renderCart(cart, window._cfConfig);
               if (url.includes('/cart/add')) openCart();
@@ -1019,6 +981,7 @@
     // Fetch initial cart to get SKUs for upsells
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items || []).map(i => i.sku).filter(Boolean).join(',');
+    _lastSkus = initialSkus;
 
     const config = await getConfig(initialSkus);
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
