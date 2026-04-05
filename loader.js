@@ -664,7 +664,9 @@
     if (qty < 0) return;
     await (window._cfOrigFetch||fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
     const cart = await fetchShopifyCart();
-    if (window._cfConfig) { _lastSkus=''; await fetchUpsells(cart); renderCart(cart, window._cfConfig); }
+   if (window._cfConfig) {
+  renderCart(cart, window._cfConfig);
+}
   };
 
   // ── Add Upsell — busca variant_id na loja vitrine pelo SKU (com cache) ──
