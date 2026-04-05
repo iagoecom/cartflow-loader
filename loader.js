@@ -18,7 +18,7 @@
       _pendingOpen = false;
       fetchShopifyCart().then(async cart => {
         if (window._cfConfig) {
-          await refreshUpsellsIfNeeded(cart);
+          await fetchUpsells(cart);
           renderCart(cart, window._cfConfig);
           openCart();
         }
@@ -107,23 +107,21 @@
     } catch(e) { return null; }
   }
 
-  // ── Smart upsell refresh: only re-fetch when SKUs change ──
-  async function refreshUpsellsIfNeeded(cart) {
+  // ── Fetch upsells dynamically based on current cart SKUs ──
+  async function fetchUpsells(cart) {
     const skus = (cart.items || []).map(i => i.sku).filter(Boolean).join(',');
-    if (skus === window._cfLastSkus) return;
-    window._cfLastSkus = skus;
     if (!skus) {
       if (window._cfConfig) window._cfConfig.upsells = [];
       return;
     }
     try {
-      const r = await (window._cfOrigFetch || fetch)(`${API_URL}?token=${TOKEN}&skus=${skus}`);
+      const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`);
       if (r.ok) {
         const data = await r.json();
         if (window._cfConfig) window._cfConfig.upsells = data.upsells || [];
       }
     } catch(e) {
-      console.warn('[CartFlow] refreshUpsells error:', e);
+      console.warn('[CartFlow] fetchUpsells error:', e);
     }
   }
 
@@ -548,9 +546,9 @@
                   <div style="display:flex;flex-direction:column;gap:4px">
                     ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
                     <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px">
-                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;width:28px;height:26px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;box-sizing:border-box;-webkit-user-select:none;user-select:none">${SVG_ICONS.minus}</span>
+                      <button onclick="cfQty('${item.key}',${item.quantity-1})" style="width:28px;height:26px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit">${SVG_ICONS.minus}</button>
                       <span style="font-size:13px;width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25)">${item.quantity}</span>
-                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;width:28px;height:26px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;box-sizing:border-box;-webkit-user-select:none;user-select:none">${SVG_ICONS.plus}</span>
+                      <button onclick="cfQty('${item.key}',${item.quantity+1})" style="width:28px;height:26px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;color:inherit">${SVG_ICONS.plus}</button>
                     </div>
                   </div>
                   <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
@@ -595,8 +593,8 @@
                       <span style="font-size:12px;font-weight:600">${formatPriceDollars(p.price||0)}</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
-                      ${(p.variants && p.variants.length > 1) ? `<select id="cf-upsell-var-${p.id}" onchange="document.getElementById('cf-upsell-btn-${p.id}').dataset.vid=this.value" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0">${p.variants.map((vr,vi) => `<option value="${vr.id}"${vi===0?' selected':''}>${vr.option_value||vr.sku}</option>`).join('')}</select>` : ''}
-                      <span role="button" tabindex="0" id="cf-upsell-btn-${p.id}" data-vid="${p.variant_id||''}" onclick="cfAddUpsell(this.dataset.vid,'${(p.title||'').replace(/'/g,"\\'")}',${p.price||0})" style="all:unset;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box">${v.upsells_button_text||'+Add'}</span>
+                      <select style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option>Default</option></select>
+                      <button onclick="cfAddUpsell('${p.sku||''}','${(p.title||'').replace(/'/g,"\\'")}',${p.price||0})" style="font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;border:none;cursor:pointer;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>
                     </div>
                   </div>
                 </div>
@@ -823,29 +821,25 @@
     await (window._cfOrigFetch || fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
     const cart = await fetchShopifyCart();
     if (window._cfConfig) {
-      await refreshUpsellsIfNeeded(cart);
+      await fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
     }
   };
 
-  window.cfAddUpsell = async (variantId, title, price) => {
-    if (!variantId) return;
+  window.cfAddUpsell = async (sku, title, price) => {
+    if (!sku) return;
     try {
-      const res = await (window._cfOrigFetch || fetch)('/cart/add.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:[{id: Number(variantId), quantity:1}]}) });
+      const res = await (window._cfOrigFetch || fetch)('/cart/add.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:[{id: sku, quantity:1}]}) });
       if (!res.ok) {
-        console.warn('[CartFlow] Failed to add upsell:', variantId);
+        console.warn('[CartFlow] Failed to add upsell:', sku);
         return;
       }
     } catch(e) { console.warn('[CartFlow] Upsell add error:', e); return; }
     const cart = await fetchShopifyCart();
     if (window._cfConfig) {
-      const newSkus = (cart.items || []).map(i => i.sku).filter(Boolean).join(',');
-      if (newSkus !== window._cfLastSkus) {
-        const freshConfig = await getConfig(newSkus);
-        if (freshConfig) { window._cfConfig.upsells = freshConfig.upsells || []; window._cfLastSkus = newSkus; }
-      }
+      await fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
-      trackEvent('upsell_added', price, {title, variantId});
+      trackEvent('upsell_added', price, {title, sku});
     }
   };
 
@@ -865,7 +859,7 @@
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
             const cart = await fetchShopifyCart();
             if (_cartReady && window._cfConfig) {
-              await refreshUpsellsIfNeeded(cart);
+              await fetchUpsells(cart);
               renderCart(cart, window._cfConfig);
               if (url.includes('/cart/add')) openCart();
             } else if (url.includes('/cart/add')) {
@@ -895,7 +889,7 @@
         e.preventDefault(); e.stopPropagation();
         const cart=await fetchShopifyCart();
         if(window._cfConfig) {
-          await refreshUpsellsIfNeeded(cart);
+          await fetchUpsells(cart);
           renderCart(cart, window._cfConfig);
         }
         openCart();
@@ -912,7 +906,6 @@
     const config = await getConfig(initialSkus);
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
-    window._cfLastSkus = initialSkus;
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
     interceptCart();
