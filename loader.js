@@ -891,14 +891,24 @@ selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchan
     }
 
     // Fallback: use variant_id from product root
-    if (!shopifyVariantId && product.variant_id) {
-      shopifyVariantId = product.variant_id;
-    }
+if (!shopifyVariantId && product.variant_id) {
+  shopifyVariantId = product.variant_id;
+}
 
-    if (!shopifyVariantId) {
-      console.warn('[CartFlow] No shopify_variant_id for upsell:', productId);
-      return;
-    }
+// FALLBACK FINAL: usar SKU map da config
+if (!shopifyVariantId || shopifyVariantId === 'null') {
+  const skuMap = window._cfConfig?.routing?.sku_map || {};
+  const sku = product.sku || product.sku_base || '';
+  if (sku && skuMap[sku]) {
+    shopifyVariantId = String(skuMap[sku]);
+    console.log('[CartFlow] SKU map fallback:', sku, '→', shopifyVariantId);
+  }
+}
+
+if (!shopifyVariantId || shopifyVariantId === 'null') {
+  console.warn('[CartFlow] No variant ID for upsell:', product.title, product);
+  return;
+}
 
     try {
       const res = await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
