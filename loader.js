@@ -482,10 +482,12 @@
           const lineTotalDollars = lineTotal / 100;
           const lineCompare = (item.original_price||item.price) * item.quantity;
           const lineCompareDollars = lineCompare / 100;
-          const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
-          const itemRewardDiscount = rewardDiscount * itemShare;
-          const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
-          const totalSavingsItem = lineCompareDollars - discountedTotal;
+const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
+const itemRewardDiscount = rewardDiscount * itemShare;
+const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
+const hasShopifyDiscount = item.original_price > item.price;
+const totalSavingsItem = lineCompareDollars - discountedTotal;
+const hasDis = hasShopifyDiscount || lineCompareDollars > discountedTotal;
           const hasDis = lineCompareDollars > discountedTotal;
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
