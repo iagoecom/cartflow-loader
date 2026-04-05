@@ -12,7 +12,7 @@
   let _spActive = false;
   let _gwActive = false;
   let _lastSkus = '';
-  let _vitrineSkuMap = null;
+  let _vitrineSkuMap = null; // Cache do SKU map da loja vitrine
 
   function onCartReady() {
     _cartReady = true;
@@ -73,29 +73,23 @@
 
   // ── SVG Icons ──
   const SVG_ICONS = {
-    truck: '',
-    tag: '',
-    gift: '',
-    star: '',
-    shield: '',
-    trash: '',
-    minus: '',
-    plus: '',
-    lock: '',
-    close: (sw) => ``,
-    check: '',
+    truck: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>',
+    tag: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>',
+    gift: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5"/></svg>',
+    star: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+    shield: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>',
+    trash: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>',
+    minus: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>',
+    plus: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+    lock: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+    close: (sw) => `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+    check: '<svg width="10" height="10" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   };
 
   const PRESETS = {
     returns_warranty: 'Free returns + 30-day warranty',
     secure_delivery: 'Secure payment + Guaranteed delivery',
     protected_support: 'Protected purchase + 24/7 support',
-  };
-
-  // ── Preset Images (trust badges) ──
-  const PRESET_IMAGES = {
-    payment_icons: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/payment-icons-transparent.png',
-    returns_warranty: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/free-return-guarantee-transparent.png',
   };
 
   // ── Config ──
@@ -211,13 +205,11 @@
     segments.push({ value: mins, label: labels[2]||'MIN' });
     segments.push({ value: secs, label: labels[3]||'SEG' });
     container.innerHTML = segments.map((seg, i) => `
-      <div style="display:flex;flex-direction:column;align-items:center;">
-        <div style="background:${blockBg};color:${textColor};padding:4px 8px;border-radius:4px;font-size:16px;font-weight:700;min-width:36px;text-align:center;">
-          ${String(seg.value).padStart(2,'0')}
-        </div>
-        <span style="font-size:8px;color:${annTextColor};margin-top:2px;">${seg.label}</span>
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <div style="display:flex;align-items:center;justify-content:center;border-radius:6px;font-weight:700;width:36px;height:36px;font-size:16px;background:${blockBg};color:${textColor}">${String(seg.value).padStart(2,'0')}</div>
+        <span style="font-size:9px;margin-top:2px;opacity:0.7;color:${annTextColor}">${seg.label}</span>
       </div>
-      ${i < segments.length-1 ? `<span style="font-size:16px;font-weight:700;color:${textColor};margin:0 2px;">:</span>` : ''}
+      ${i < segments.length-1 ? `<span style="font-size:18px;font-weight:700;margin-top:-12px;color:${annTextColor}">:</span>` : ''}
     `).join('');
   }
 
@@ -284,36 +276,39 @@
     const headerJustify = v.header_alignment === 'center' ? 'center' : v.header_alignment === 'right' ? 'flex-end' : 'flex-start';
     const isCloseLeft = v.close_button_position === 'left';
     const headerTitleHtml = v.header_title_type === 'logo' && v.header_logo_url
-      ? `<img src="${v.header_logo_url}" alt="Logo" style="height:${v.header_logo_size||32}px;object-fit:contain;">`
+      ? `<img id="cf-header-logo" src="${v.header_logo_url}" alt="Logo" style="height:${v.header_logo_size||32}px;object-fit:contain;" />`
       : `<${v.header_heading_level||'h3'} id="cf-title-el" style="font-size:${hd.fs}px;font-weight:${hd.fw};margin:0;${v.header_text_color_override?'color:'+v.header_text_color_override+';':''}">Cart • 0</${v.header_heading_level||'h3'}>`;
 
     overlay.innerHTML = `
-      <div id="cf-drawer" style="display:flex;flex-direction:column;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:${headerPy} 16px;background:${v.header_bg_color||'transparent'};border-bottom:${v.header_border==='none'?'none':`${bdr} solid ${v.header_border_color||'#e5e7eb'}`};${isCloseLeft?'flex-direction:row-reverse;':''}">
-          <div style="display:flex;align-items:center;justify-content:${headerJustify};flex:1;">${headerTitleHtml}</div>
-          <button id="cf-close" style="background:${v.close_bg_color||'transparent'};border:none;cursor:pointer;padding:6px;border-radius:6px;color:${v.close_icon_color||'#000'};display:flex;align-items:center;justify-content:center;width:32px;height:32px;transition:background 0.15s,color 0.15s;">
+      <div id="cf-drawer">
+        <div id="cf-header" style="padding:${headerPy} 16px;display:flex;align-items:center;flex-shrink:0;background:${v.header_bg_color||'#FFFFFF'};${v.header_border_thickness!=='none'?'border-bottom:'+bdr+' solid '+(v.header_border_color||'#e5e7eb')+';':''}${isCloseLeft?'flex-direction:row-reverse;':''}">
+          <div style="flex:1;display:flex;align-items:center;justify-content:${headerJustify}">${headerTitleHtml}</div>
+          <button id="cf-close" style="background:${v.close_bg_color||'transparent'};border:none;cursor:pointer;padding:4px;line-height:0;border-radius:4px;flex-shrink:0;width:${parseInt(closeSz)+8}px;height:${parseInt(closeSz)+8}px;display:flex;align-items:center;justify-content:center;color:${v.close_icon_color||'#000'};transition:all 0.15s;">
             ${SVG_ICONS.close(closeSw)}
           </button>
         </div>
         <div id="cf-body">
           <div id="cf-ann-before"></div>
           <div id="cf-rewards"></div>
-          <div id="cf-ann-after"></div>
           <div id="cf-upsells-top"></div>
-          <div id="cf-badges-top"></div>
-          <div id="cf-items" style="flex:1;padding:0 16px;"></div>
-          <div id="cf-addon-section" style="padding:0 16px;"></div>
-        </div>
-        <div style="border-top:1px solid rgba(0,0,0,0.08);padding:12px 16px;">
+          <div id="cf-items"></div>
+          <div id="cf-ann-after"></div>
           <div id="cf-upsells-bottom"></div>
-          <div id="cf-badges-bottom"></div>
-          <div id="cf-discounts-row" style="display:none;justify-content:space-between;font-size:13px;margin-bottom:6px;color:#16a34a;"></div>
-          <div id="cf-subtotal-row" style="display:flex;justify-content:space-between;font-size:15px;font-weight:600;margin-bottom:10px;">
-            <span style="color:${v.subtotal_text_color||'inherit'}">Subtotal:</span>
-            <span id="cf-subtotal" style="color:${v.subtotal_text_color||'inherit'}"></span>
+          <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
+        </div>
+        <div id="cf-footer" style="flex-shrink:0;border-top:1px solid rgba(0,0,0,0.08);">
+          <div id="cf-badges-top"></div>
+          <div class="cf-footer-inner" style="padding:12px 16px;">
+            <div id="cf-discounts-row" style="display:none;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:8px;"></div>
+            <div id="cf-subtotal-row" style="display:flex;justify-content:space-between;font-size:15px;margin-bottom:8px;">
+              <span style="font-weight:500">Subtotal:</span>
+              <span id="cf-subtotal" style="font-weight:700"></span>
+            </div>
+            <button id="cf-checkout">${SVG_ICONS.lock} Secure Checkout</button>
+            <div id="cf-continue-wrap"></div>
+            <div id="cf-express-wrap"></div>
           </div>
-          <button id="cf-checkout">${SVG_ICONS.lock} Secure Checkout</button>
-          <div id="cf-continue-wrap" style="text-align:center;margin-top:8px;"></div>
+          <div id="cf-badges-bottom"></div>
         </div>
       </div>
     `;
@@ -347,7 +342,7 @@
     const variants = product.variants || [];
     const meaningful = variants.filter(vr => vr.option_value && vr.option_value !== 'Default Title' && vr.option_value.trim() !== '');
     if (meaningful.length === 0) {
-      return `<span style="display:none;" data-cf-selected-sku="${variants[0]?.sku||''}">Default</span>`;
+      return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${variants[0]?.sku||''}" style="display:flex;gap:8px;flex:1;min-width:0"><select class="cf-upsell-select" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option>Default</option></select></span>`;
     }
     const optionGroups = new Map();
     for (const vr of meaningful) {
@@ -366,11 +361,11 @@
     for (const [name, valuesSet] of optionGroups) {
       const values = [...valuesSet];
       const defaultVal = firstValues[idx]||values[0];
-      const options = values.map(val => `<option value="${val}" ${val===defaultVal?'selected':''}>${val}</option>`).join('');
-      selectsHtml += `<select data-cf-option="${name}" onchange="cfUpdateUpsellVariant(this)" style="font-size:11px;padding:2px 4px;border:1px solid #ddd;border-radius:4px;background:#fff;max-width:80px;">${options}</select>`;
+      const options = values.map(val => `<option value="${val}"${val===defaultVal?' selected':''}>${val}</option>`).join('');
+      selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0">${options}</select>`;
       idx++;
     }
-    return `<div data-cf-selected-sku="${defaultSku}" style="display:flex;gap:4px;flex-wrap:wrap;">${selectsHtml}</div>`;
+    return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${defaultSku}" style="display:flex;gap:8px;flex:1;min-width:0">${selectsHtml}</span>`;
   }
 
   window.cfUpdateUpsellVariant = function(selectEl) {
@@ -411,10 +406,10 @@
       const annHeightPy = v.announcement_height==='compact'?'6px':v.announcement_height==='tall'?'16px':'10px';
       const annAlign = v.announcement_alignment||'center';
       const isBlocks = v.announcement_timer_style==='blocks';
-      const inlineTimerHtml = _timerSeconds>0 && !isBlocks ? `<span id="cf-timer-value" style="font-weight:700;">${formatTimer(_timerSeconds)}</span>` : '';
+      const inlineTimerHtml = _timerSeconds>0 && !isBlocks ? `<span style="font-weight:600">${formatTimer(_timerSeconds)}</span>` : '';
       const annText = (v.announcement_text||'').replace('{{timer}}', inlineTimerHtml);
       const blocksHtml = _timerSeconds>0 && isBlocks ? `<div id="cf-timer-blocks" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px;"></div>` : '';
-      const annHtml = `<div style="background:${v.announcement_bg_color||'#fff3cd'};color:${v.announcement_text_color||'#333'};padding:${annHeightPy} 16px;text-align:${annAlign};font-size:${v.announcement_font_size||13}px;border-bottom:1px solid ${v.announcement_border_color||'transparent'};">${annText}${blocksHtml}</div>`;
+      const annHtml = `<div style="padding:${annHeightPy} 16px;background:${v.announcement_bg_color||'#f2f2f2'};border-bottom:1px solid ${v.announcement_border_color||'#efefef'};color:${v.announcement_text_color||'#333'};font-size:${v.announcement_font_size||14}px;text-align:${annAlign};flex-shrink:0;"><div>${annText}</div>${blocksHtml}</div>`;
       const target = v.announcement_position==='after' ? annAfter : annBefore;
       if (target) {
         target.innerHTML = annHtml;
@@ -453,8 +448,8 @@
         const rawText = nextT
           ? (nextT.title_before || `Add {remaining} more to unlock ${nextT.reward_description||'the next reward'}`).replace('{remaining}', String(rem)).replace('{{count}}', String(totalQty))
           : (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
-        let barHtml = '<div style="display:flex;align-items:center;position:relative;height:8px;margin-bottom:8px;">';
-        let labelsHtml = '<div style="display:flex;justify-content:space-between;margin-top:4px;">';
+        let barHtml = '<div style="display:flex;align-items:center;gap:0">';
+        let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
         sorted.forEach((tier, idx) => {
           const segStart = idx===0 ? 0 : sorted[idx-1].minimum_value;
           const segEnd = tier.minimum_value;
@@ -463,54 +458,39 @@
           const reached = simValue >= tier.minimum_value;
           const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
           const circleSize = reached ? 28 : 20;
-          barHtml += `<div style="flex:1;height:${v.rewards_bar_height||6}px;background:${v.rewards_bar_bg_color||'#e5e7eb'};border-radius:99px;overflow:hidden;position:relative;">`;
-          barHtml += `<div style="width:${lp}%;height:100%;background:${v.rewards_bar_fg_color||'#22c55e'};border-radius:99px;transition:width 0.3s;"></div></div>`;
-          barHtml += `<div style="width:${circleSize}px;height:${circleSize}px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;${reached?`background:${v.rewards_complete_icon_color||v.rewards_bar_fg_color||'#22c55e'};color:#fff;`:`background:#fff;border:2px solid ${v.rewards_incomplete_icon_color||'#d1d5db'};color:${v.rewards_incomplete_icon_color||'#d1d5db'};`}">`;
-          barHtml += reached ? iconSvg : `<span style="font-size:10px;">${idx+1}</span>`;
+          barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'}"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'};transition:width 0.4s;width:${lp}%"></div></div>`;
+          barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'};color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'}">`;
+          barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
           barHtml += '</div>';
-          labelsHtml += '<div style="text-align:center;flex:1;">';
-          labelsHtml += `<span style="font-size:10px;color:#888;">${tier.reward_description||tier.reward_type||''}</span>`;
+          labelsHtml += '<div style="flex:1"></div>';
+          labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
         });
         barHtml += '</div>'; labelsHtml += '</div>';
-        rwEl.innerHTML = `<div style="padding:12px 16px;"><div style="font-size:${v.rewards_font_size||13}px;text-align:center;margin-bottom:8px;">${rawText}</div>${barHtml}${labelsHtml}</div>`;
+        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${v.rewards_font_size||14}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
       }
     }
 
     const itemsEl = document.getElementById('cf-items');
     if (itemsEl) {
       if (items.length === 0) {
-        itemsEl.innerHTML = '<div class="cf-empty"><div class="cf-empty-icon">🛒</div><div>Your cart is empty</div></div>';
+        itemsEl.innerHTML = '<div class="cf-empty"><div class="cf-empty-icon">🛒</div><p>Your cart is empty</p></div>';
       } else {
         const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
         const rawSubtotalDollars = rawSubtotalCents / 100;
         itemsEl.innerHTML = items.map((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
-
-          // ── FIX: Use compare_at_price instead of original_price ──
-          const compareAtPrice = item.compare_at_price || 0;
-          const productComparePrice = compareAtPrice > 0 ? compareAtPrice : item.price;
-          const lineCompare = productComparePrice * item.quantity;
+          const lineCompare = (item.original_price||item.price) * item.quantity;
           const lineCompareDollars = lineCompare / 100;
-
-          // Separate product saving from reward saving
-          const productSaving = lineCompareDollars > lineTotalDollars ? (lineCompareDollars - lineTotalDollars) : 0;
-
-          const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
-          const itemRewardDiscount = rewardDiscount * itemShare;
-          const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
-
-          // Show strikethrough if product has compare_at_price OR if reward discount applies
-          const hasProductDiscount = lineCompareDollars > lineTotalDollars;
-          const hasRewardDiscount = itemRewardDiscount > 0;
-          const hasDis = v.show_strikethrough !== false && (hasProductDiscount || hasRewardDiscount);
-
-          // Total savings = product discount + reward discount
-          const totalSavingsItem = productSaving + itemRewardDiscount;
-
-          // The "original" price to show struck through
-          const strikethroughPrice = lineCompareDollars;
-
+const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
+const itemRewardDiscount = rewardDiscount * itemShare;
+const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
+const hasShopifyDiscount = item.original_price > item.price;
+const shopifyDiscountAmount = (item.original_price - item.price) * item.quantity / 100;
+const hasDis = hasShopifyDiscount || lineCompareDollars > discountedTotal;
+const totalSavingsItem = hasShopifyDiscount 
+  ? shopifyDiscountAmount + itemRewardDiscount
+  : lineCompareDollars - discountedTotal;
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
@@ -521,28 +501,28 @@
           }
           const borderBottom = idx < items.length-1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
           return `
-            <div style="display:flex;gap:12px;padding:14px 0;${borderBottom}">
-              <div style="width:72px;height:72px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#f5f5f5;">
-                <img src="${item.image}" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;">
+            <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
+              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;">
+                <img src="${item.image||item.featured_image?.url||'/placeholder.svg'}" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" />
               </div>
-              <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                  <span style="font-size:13px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${productTitle}</span>
-                  <button onclick="cfQty('${item.key}',0)" style="background:none;border:none;cursor:pointer;padding:2px;color:#999;flex-shrink:0;">${SVG_ICONS.trash}</button>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+                  <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;margin:0">${productTitle}</p>
+                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;flex-shrink:0;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:auto;padding-top:6px;">
-                  <div style="display:flex;flex-direction:column;gap:4px;">
-                    ${variantLabel ? `<span style="font-size:11px;color:#888;">${variantLabel}</span>` : ''}
-                    <div style="display:flex;align-items:center;gap:0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
-                      <button onclick="cfQty('${item.key}',${item.quantity-1})" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#666;display:flex;align-items:center;">${SVG_ICONS.minus}</button>
-                      <span style="padding:4px 8px;font-size:13px;min-width:20px;text-align:center;">${item.quantity}</span>
-                      <button onclick="cfQty('${item.key}',${item.quantity+1})" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#666;display:flex;align-items:center;">${SVG_ICONS.plus}</button>
+                <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px">
+                  <div style="display:flex;flex-direction:column;gap:4px">
+                    ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
+<div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px;overflow:hidden;width:fit-content;">
+<span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
+<span style="box-sizing:border-box;font-size:13px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
+<span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                     </div>
                   </div>
-                  <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
-                    ${hasDis ? `<span style="font-size:12px;color:#999;text-decoration:line-through;">${formatPriceDollars(strikethroughPrice)}</span>` : ''}
-                    <span style="font-size:14px;font-weight:600;">${formatPriceDollars(discountedTotal)}</span>
-                    ${hasDis && totalSavingsItem > 0 ? `<span style="font-size:11px;color:${v.savings_color||'#16a34a'};font-weight:500;">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
+                  <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
+${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
+<span style="font-size:16px;font-weight:700">${formatPriceDollars(hasShopifyDiscount ? lineTotalDollars : discountedTotal)}</span>
+${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.savings_color||'#22c55e'}">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
                   </div>
                 </div>
               </div>
@@ -561,24 +541,24 @@
       const upsellText = accentTextColor;
       const isStack = (v.upsells_direction||'stack') !== 'inline';
       const html = `
-        <div style="padding:12px 0;">
-          <div style="font-size:${v.upsells_title_font_size||13}px;font-weight:600;color:${v.upsells_title_color||'inherit'};margin-bottom:8px;padding:0 16px;">${v.upsells_title||'RECOMMENDED FOR YOU'}</div>
-          <div style="display:flex;flex-direction:${isStack?'column':'row'};gap:8px;${isStack?'':'overflow-x:auto;'}padding:0 16px;" data-cf-product-id="">
+        <div style="padding:12px 16px;border-top:1px solid rgba(0,0,0,0.08);margin-top:16px">
+          <p style="font-size:${v.upsells_title_font_size||14}px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-align:center;opacity:0.6;margin:0 0 12px 0">${v.upsells_title||'RECOMMENDED FOR YOU'}</p>
+          <div style="display:flex;${isStack?'flex-direction:column;gap:12px':'gap:8px;overflow-x:auto'}">
             ${upsells.map(p => {
               const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
               const variantHtml = buildUpsellVariantHtml(p, v);
               return `
-                <div data-cf-upsell-card="${p.id}" data-cf-product-id="${p.id}" style="display:flex;gap:10px;padding:10px;border-radius:8px;background:${upsellBg};${isStack?'':'min-width:200px;flex-shrink:0;'}">
-                  ${p.image_url ? `<div style="width:56px;height:56px;border-radius:6px;overflow:hidden;flex-shrink:0;"><img src="${p.image_url}" style="width:100%;height:100%;object-fit:cover;"></div>` : `<div style="width:56px;height:56px;border-radius:6px;background:#e5e7eb;flex-shrink:0;"></div>`}
-                  <div style="flex:1;display:flex;flex-direction:column;gap:4px;min-width:0;">
-                    <span style="font-size:12px;font-weight:600;color:${upsellText};">${p.title}</span>
-                    <div style="display:flex;align-items:center;gap:4px;">
-                      ${hasCompare ? `<span style="font-size:11px;color:#999;text-decoration:line-through;">${formatPriceDollars(p.compare_price)}</span>` : ''}
-                      <span style="font-size:12px;font-weight:600;color:${upsellText};">${formatPriceDollars(p.price||0)}</span>
+                <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
+                  ${p.image_url ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0"><img src="${p.image_url}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
+                  <div style="flex:1;min-width:0">
+                    <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
+                    <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+                      ${hasCompare ? `<span style="font-size:12px;text-decoration:line-through;opacity:0.5">${formatPriceDollars(p.compare_price)}</span>` : ''}
+                      <span style="font-size:12px;font-weight:600">${formatPriceDollars(p.price||0)}</span>
                     </div>
-                    <div style="display:flex;align-items:center;gap:4px;margin-top:2px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
                       ${variantHtml}
-                      <button onclick="cfAddUpsell('${p.id}')" style="background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">${v.upsells_button_text||'+Add'}</button>
+                      <button onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>
                     </div>
                   </div>
                 </div>`;
@@ -598,18 +578,17 @@
         const spDesc = v.sp_description||'Coverage against loss, damage, or theft.';
         const spPrice = Number(v.sp_price||4.99);
         const spPriceText = v.sp_price_type==='percentage' ? `${spPrice}%` : formatPriceDollars(spPrice);
-        addonHtml += `<div onclick="cfToggleAddon('sp')" style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;border:1px solid ${_spActive?v.button_color||'#000':'#e5e7eb'};cursor:pointer;margin-bottom:8px;"><div style="width:20px;height:20px;border-radius:4px;border:2px solid ${_spActive?v.button_color||'#000':'#ccc'};display:flex;align-items:center;justify-content:center;flex-shrink:0;background:${_spActive?v.button_color||'#000':'transparent'};color:#fff;">${_spActive?SVG_ICONS.check:''}</div>${v.sp_icon?`<img src="${v.sp_icon}" style="width:24px;height:24px;object-fit:contain;">`:''}<div style="flex:1;"><div style="font-size:12px;font-weight:600;">${spTitle}</div><div style="font-size:11px;color:#888;">${spDesc}</div></div><span style="font-size:12px;font-weight:600;">${spPriceText}</span></div>`;
+        addonHtml += `<div style="padding:12px 16px 0 16px"><div id="cf-addon-sp" onclick="window.cfToggleAddon('sp')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_spActive?'#059669':'rgba(0,0,0,0.10)'};background:${_spActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_spActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_spActive?SVG_ICONS.check:''}</div>${v.sp_icon?`<img src="${v.sp_icon}" alt="SP" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:12px;font-weight:600;margin:0">${spTitle}</p><p style="font-size:12px;opacity:0.6;margin:0">${spDesc}</p></div></div><span style="font-size:14px;font-weight:600;flex-shrink:0;margin-left:8px">${spPriceText}</span></div></div></div>`;
       }
       if (v.gift_wrap_enabled) {
         const gwTitle = v.gw_title||'Gift Wrapping';
         const gwDesc = v.gw_description||'Beautiful gift wrapping for your order.';
         const gwPrice = Number(v.gift_wrap_price||2.99);
-        addonHtml += `<div onclick="cfToggleAddon('gw')" style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;border:1px solid ${_gwActive?v.button_color||'#000':'#e5e7eb'};cursor:pointer;margin-bottom:8px;"><div style="width:20px;height:20px;border-radius:4px;border:2px solid ${_gwActive?v.button_color||'#000':'#ccc'};display:flex;align-items:center;justify-content:center;flex-shrink:0;background:${_gwActive?v.button_color||'#000':'transparent'};color:#fff;">${_gwActive?SVG_ICONS.check:''}</div>${v.gw_icon?`<img src="${v.gw_icon}" style="width:24px;height:24px;object-fit:contain;">`:''}<div style="flex:1;"><div style="font-size:12px;font-weight:600;">${gwTitle}</div><div style="font-size:11px;color:#888;">${gwDesc}</div></div><span style="font-size:12px;font-weight:600;">${formatPriceDollars(gwPrice)}</span></div>`;
+        addonHtml += `<div style="padding:8px 16px 0 16px"><div id="cf-addon-gw" onclick="window.cfToggleAddon('gw')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_gwActive?'#059669':'rgba(0,0,0,0.10)'};background:${_gwActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_gwActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_gwActive?SVG_ICONS.check:''}</div>${v.gw_icon?`<img src="${v.gw_icon}" alt="GW" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:12px;font-weight:600;margin:0">${gwTitle}</p><p style="font-size:12px;opacity:0.6;margin:0">${gwDesc}</p></div></div><span style="font-size:14px;font-weight:600;flex-shrink:0;margin-left:8px">${formatPriceDollars(gwPrice)}</span></div></div></div>`;
       }
       if (addonHtml) addonEl.innerHTML = addonHtml;
     }
 
-    // ── Trust Badges (with preset images) ──
     const badgesTop = document.getElementById('cf-badges-top');
     const badgesBot = document.getElementById('cf-badges-bottom');
     if (badgesTop) badgesTop.innerHTML = '';
@@ -619,13 +598,8 @@
       const badgeSize = v.trust_badges_image_size||40;
       const badgePos = v.trust_badges_position||'below';
       let badgeHtml = '';
-      if (badgeImgUrl) {
-        badgeHtml = `<div style="text-align:center;padding:8px 16px;"><img src="${badgeImgUrl}" alt="Trust Badges" style="max-height:${badgeSize}px;object-fit:contain;"></div>`;
-      } else if (PRESET_IMAGES[v.trust_badges_preset]) {
-        badgeHtml = `<div style="text-align:center;padding:8px 16px;"><img src="${PRESET_IMAGES[v.trust_badges_preset]}" alt="Trust Badges" style="max-height:${badgeSize}px;object-fit:contain;"></div>`;
-      } else if (PRESETS[v.trust_badges_preset]) {
-        badgeHtml = `<div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 16px;font-size:12px;color:#888;">${SVG_ICONS.shield} ${PRESETS[v.trust_badges_preset]}</div>`;
-      }
+      if (badgeImgUrl) badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${badgeImgUrl}" alt="Trust Badge" style="max-height:${badgeSize}px;max-width:100%;object-fit:contain"/></div>`;
+      else if (PRESETS[v.trust_badges_preset]) badgeHtml = `<div style="text-align:center;padding:8px 16px;font-size:11px;opacity:0.6">${SVG_ICONS.shield} ${PRESETS[v.trust_badges_preset]}</div>`;
       const target = badgePos==='above' ? badgesTop : badgesBot;
       if (target && badgeHtml) target.innerHTML = badgeHtml;
     }
@@ -646,7 +620,7 @@
     if (discRow) {
       if (rewardDiscount > 0 && activeRewardLabels.length > 0) {
         discRow.style.display = 'flex';
-        discRow.innerHTML = `<span>${activeRewardLabels.join(' + ')}</span><span>-${formatPriceDollars(rewardDiscount)}</span>`;
+        discRow.innerHTML = `<span style="color:${v.savings_color||'#22c55e'};font-weight:500">${activeRewardLabels.join(' + ')}</span><span style="color:${v.savings_color||'#22c55e'};font-weight:600">-${formatPriceDollars(rewardDiscount)}</span>`;
       } else { discRow.style.display = 'none'; discRow.innerHTML = ''; }
     }
 
@@ -654,7 +628,7 @@
     if (subtotalRow) subtotalRow.style.display = v.show_subtotal_line===false ? 'none' : 'flex';
 
     const contWrap = document.getElementById('cf-continue-wrap');
-    if (contWrap) contWrap.innerHTML = v.show_continue_shopping ? `<button onclick="closeCart()" style="background:none;border:none;cursor:pointer;font-size:13px;color:#888;text-decoration:underline;">Continue Shopping</button>` : '';
+    if (contWrap) contWrap.innerHTML = v.show_continue_shopping ? `<button onclick="closeCart()" style="all:unset;box-sizing:border-box;width:100%;display:block;text-align:center;font-size:13px;margin-top:8px;cursor:pointer;opacity:0.6;text-decoration:underline">Continue Shopping</button>` : '';
   }
 
   // ── Checkout ──
@@ -694,18 +668,19 @@
     if (qty < 0) return;
     await (window._cfOrigFetch||fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
     const cart = await fetchShopifyCart();
-    if (window._cfConfig) {
-      renderCart(cart, window._cfConfig);
-    }
+   if (window._cfConfig) {
+  renderCart(cart, window._cfConfig);
+}
   };
 
-  // ── Add Upsell ──
+  // ── Add Upsell — busca variant_id na loja vitrine pelo SKU (com cache) ──
   window.cfAddUpsell = async (productId) => {
     if (!productId) return;
     const upsells = window._cfConfig?.upsells || [];
     const product = upsells.find(p => p.id === productId);
     if (!product) { console.warn('[CartFlow] Upsell not found:', productId); return; }
 
+    // Pegar SKU da variante selecionada
     const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
     const wrapper = card?.querySelector('[data-cf-selected-sku]');
     let selectedSku = wrapper?.getAttribute('data-cf-selected-sku') || '';
@@ -714,6 +689,7 @@
     }
     if (!selectedSku) { console.warn('[CartFlow] No SKU for upsell:', product.title); return; }
 
+    // Buscar variant_id na loja VITRINE (com cache)
     const vitrineMap = await getVitrineSkuMap();
     const vitrineVariantId = vitrineMap[selectedSku];
 
@@ -735,7 +711,7 @@
 
     const cart = await fetchShopifyCart();
     if (window._cfConfig) {
-      renderCart(cart, window._cfConfig);
+renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
   };
@@ -783,10 +759,10 @@
       if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
         e.preventDefault(); e.stopPropagation();
         const cart=await fetchShopifyCart();
-        if(window._cfConfig) {
-          renderCart(cart, window._cfConfig);
-        }
-        openCart();
+   if(window._cfConfig) {
+  renderCart(cart, window._cfConfig);
+}
+openCart();
       }
     }, true);
   }
@@ -797,18 +773,20 @@
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
 
-    if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
-    const [config] = await Promise.all([
-      getConfig(initialSkus),
-      getVitrineSkuMap()
-    ]);
-    if (!config) { console.warn('[CartFlow] Config not found'); return; }
-    window._cfConfig = config;
+// Interceptar ANTES de tudo
+if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
+const [config] = await Promise.all([
+  getConfig(initialSkus),
+  getVitrineSkuMap()
+]);
+if (!config) { console.warn('[CartFlow] Config not found'); return; }
+window._cfConfig = config;
 
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
     interceptCart();
 
+    // Pré-carregar vitrine SKU map em background
     getVitrineSkuMap().then(() => console.log('[CartFlow] Vitrine map ready'));
 
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
