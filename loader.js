@@ -769,6 +769,8 @@ openCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
 
+// Interceptar ANTES de tudo
+if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
 const [config] = await Promise.all([
   getConfig(initialSkus),
   getVitrineSkuMap()
