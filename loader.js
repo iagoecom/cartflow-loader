@@ -518,7 +518,7 @@ const showStrikethrough = lineCompareDollars > lineTotalDollars || discountedTot
                     </div>
                   </div>
                   <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
-${v.show_strikethrough && showStrikethrough ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
+${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
 <span style="font-size:16px;font-weight:700">${formatPriceDollars(hasShopifyDiscount ? lineTotalDollars : discountedTotal)}</span>
 ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.savings_color||'#22c55e'}">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
                   </div>
