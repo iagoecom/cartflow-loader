@@ -248,13 +248,20 @@ let _lastCart = null;
         background:${footerBg} !important;
         color:${contrastText(footerBg)};
       }
-cart-drawer,cart-notification,.cart-drawer,.cart-notification,#cart-drawer,#CartDrawer,
-#cart-notification,[id*="cart-drawer"],[class*="cart-drawer"],drawer-component[id*="cart"],
-.shopify-section-cart-drawer,.mini-cart,.js-mini-cart,#mini-cart-wrapper,
-.cart-flyout,.header-cart-flyout,.drawer--cart,#CartSpecialDrawer,
-.ajaxcart,.ajax-cart,[data-cart-drawer],[data-mini-cart],
-.side-cart,.slide-cart,.cart-sidebar
-{ display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
+      cart-drawer,cart-notification,.cart-drawer,.cart-notification,#cart-drawer,#CartDrawer,
+      #cart-notification,[id*="cart-drawer"],[class*="cart-drawer"],drawer-component[id*="cart"],
+      .shopify-section-cart-drawer,.mini-cart,.js-mini-cart,#mini-cart-wrapper,
+      .cart-flyout,.header-cart-flyout,.drawer--cart,#CartSpecialDrawer,
+      .ajaxcart,.ajax-cart,[data-cart-drawer],[data-mini-cart],
+      .side-cart,.slide-cart,.cart-sidebar
+      { display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
+      #cf-drawer *, #cf-drawer *::before, #cf-drawer *::after {
+        box-sizing:border-box;font-family:inherit;line-height:normal;
+        letter-spacing:normal;text-transform:none;text-decoration:none;
+      }
+      #cf-drawer button:not(#cf-checkout):not(#cf-close) {
+        all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+      }
       #cf-checkout {
         all: unset !important;
         box-sizing: border-box !important;
@@ -314,7 +321,7 @@ cart-drawer,cart-notification,.cart-drawer,.cart-notification,#cart-drawer,#Cart
           <div id="cf-items"></div>
           <div id="cf-ann-after"></div>
           <div id="cf-upsells-bottom"></div>
-          <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
+          <div id="cf-addon-section" style="margin-top:16px;padding-bottom:16px"></div>
         </div>
         <div id="cf-footer">
           <div id="cf-badges-top"></div>
@@ -852,8 +859,61 @@ const cart = await fetchShopifyCart();
           }
         } catch(e){}
       }
-      return result;
+    return result;
     };
+
+    // Interceptar XMLHttpRequest (PageFly, apps de terceiros)
+    const origXHROpen = XMLHttpRequest.prototype.open;
+    const origXHRSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+      this._cfUrl = String(url);
+      return origXHROpen.apply(this, [method, url, ...rest]);
+    };
+    XMLHttpRequest.prototype.send = function(body) {
+      const url = this._cfUrl || '';
+      if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
+        this.addEventListener('load', async () => {
+          try {
+            const cart = await fetchShopifyCart();
+            window._lastCart = cart;
+            if (_cartReady && window._cfConfig) {
+              _lastSkus = '';
+              await fetchUpsells(cart);
+              renderCart(cart, window._cfConfig);
+              if (url.includes('/cart/add')) openCart();
+            } else if (url.includes('/cart/add')) {
+              _pendingOpen = true;
+            }
+          } catch(e) {}
+        });
+      }
+      return origXHRSend.apply(this, arguments);
+    };
+
+    // Interceptar form submit nativo
+    document.addEventListener('submit', async (e) => {
+      const form = e.target;
+      if (form.tagName === 'FORM' && (form.action || '').includes('/cart/add')) {
+        e.preventDefault();
+        e.stopPropagation();
+        const fd = new FormData(form);
+        const body = {};
+        fd.forEach((v, k) => { body[k] = v; });
+        await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: [{ id: Number(body.id), quantity: Number(body.quantity || 1) }] })
+        });
+        const cart = await fetchShopifyCart();
+        window._lastCart = cart;
+        if (_cartReady && window._cfConfig) {
+          _lastSkus = '';
+          await fetchUpsells(cart);
+          renderCart(cart, window._cfConfig);
+          openCart();
+        }
+      }
+    }, { capture: true });
 
     document.addEventListener('click', async (e) => {
       const t = e.target;
@@ -868,17 +928,17 @@ btn.innerHTML = `<svg style="animation:cf-spin 0.8s linear infinite;width:18px;h
         catch(e){ btn.disabled=false; btn.innerHTML=origHtml; }
         return;
       }
-const triggers = [
-  '[href="/cart"]', '.cart-icon-bubble', '[data-cart-toggle]',
-  '.header__icon--cart', '[aria-label="Cart"]', '[aria-label="Open cart"]',
-  '.cart-count-bubble', '#cart-icon-bubble',
-  '.js-cart-toggle', '.cart-link', '.site-header__cart',
-  '.Header__CartIcon', '[data-action="toggle-cart"]',
-  '.cart-toggle', '#mini-cart', '.js-drawer-open-right',
-  '.cart-page-link', '.header-cart-btn', '.icon-cart',
-  '.pagefly-btn-addtocart', '[data-pf-type="ProductATC"]',
-  'a[href*="/cart"]', 'button[class*="cart"]'
-];
+    const triggers = [
+      '[href="/cart"]', '.cart-icon-bubble', '[data-cart-toggle]',
+      '.header__icon--cart', '[aria-label="Cart"]', '[aria-label="Open cart"]',
+      '.cart-count-bubble', '#cart-icon-bubble',
+      '.js-cart-toggle', '.cart-link', '.site-header__cart',
+      '.Header__CartIcon', '[data-action="toggle-cart"]',
+      '.cart-toggle', '#mini-cart', '.js-drawer-open-right',
+      '.cart-page-link', '.header-cart-btn', '.icon-cart',
+      '.pagefly-btn-addtocart', '[data-pf-type="ProductATC"]',
+      'a[href*="/cart"]', 'button[class*="cart"]'
+    ];
 if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
   e.preventDefault(); e.stopPropagation();
   // Mostrar cache instantaneamente
