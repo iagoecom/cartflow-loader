@@ -708,10 +708,13 @@ if (activeRewardLabels.length > 0) {
         const badges = activeRewardLabels.map(label =>
           `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;background:${v.savings_color||'#22c55e'}20;color:${v.savings_color||'#22c55e'};border:1px solid ${v.savings_color||'#22c55e'}40">${SVG_ICONS.tag} ${label}</span>`
         ).join('');
-        discRow.innerHTML = `
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${badges}</div>
-${rewardDiscount > 0 ? `<span style="color:${v.savings_color||'#22c55e'};font-weight:700;white-space:nowrap">-${formatPriceDollars(rewardDiscount)}</span>` : ''}
-        `;
+discRow.innerHTML = `
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <span style="color:${v.savings_color||'#22c55e'};font-weight:500;font-size:12px">Discounts</span>
+    ${badges}
+  </div>
+  ${rewardDiscount > 0 ? `<span style="color:${v.savings_color||'#22c55e'};font-weight:700;white-space:nowrap">-${formatPriceDollars(rewardDiscount)}</span>` : ''}
+`;
       } else {
         discRow.style.display = 'none';
         discRow.innerHTML = '';
