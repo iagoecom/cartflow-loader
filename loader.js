@@ -221,33 +221,6 @@ let _lastCart = null;
   }
 
   // ── Styles ──
-  #cf-rewards *,
-#cf-rewards *::before,
-#cf-rewards *::after {
-  box-sizing: border-box !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: none !important;
-  float: none !important;
-  clear: none !important;
-  min-width: 0 !important;
-  min-height: 0 !important;
-  max-width: none !important;
-  max-height: none !important;
-  text-indent: 0 !important;
-  text-transform: none !important;
-  letter-spacing: normal !important;
-  word-spacing: normal !important;
-  line-height: normal !important;
-}
-#cf-rewards svg {
-  width: 14px !important;
-  height: 14px !important;
-  display: block !important;
-  flex-shrink: 0 !important;
-  fill: currentColor !important;
-}
-
   function injectStyles(v) {
     const dw = getDrawerWidth(v);
     const mw = v.cart_width_mobile === 'default' ? '90vw' : '100vw';
@@ -542,7 +515,7 @@ if (!nextT) {
           labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
         });
         barHtml += '</div>'; labelsHtml += '</div>';
-        rwEl.innerHTML = `<div id="cf-rewards" style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${v.rewards_font_size||14}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
+        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${v.rewards_font_size||14}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
       }
     }
 
