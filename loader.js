@@ -271,6 +271,7 @@ let _lastCart = null;
         box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
         transition: background-color 0.15s ease, opacity 0.15s ease !important;
       }
+      @keyframes cf-spin { to { transform: rotate(360deg); } }
       @media (max-width:480px) { #cf-drawer { width:${mw};right:-${mw}; } }
     `;
     document.head.appendChild(style);
@@ -847,8 +848,7 @@ discRow.innerHTML = `
         if(!btn||btn.disabled) return;
         btn.disabled = true;
         const origHtml = btn.innerHTML;
-        btn.innerHTML = 'Redirecting...';
-        try { const cart=await fetchShopifyCart(); const url=await buildCheckoutUrl(cart.items,window._cfConfig); trackEvent('checkout',cart.total_price/100); window.location.href=url||'/checkout'; }
+btn.innerHTML = `<svg style="animation:cf-spin 0.8s linear infinite;width:18px;height:18px;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-opacity="0.3"/><path d="M12 2a10 10 0 0 1 10 10"/></svg> SECURE CHECKOUT`;        try { const cart=await fetchShopifyCart(); const url=await buildCheckoutUrl(cart.items,window._cfConfig); trackEvent('checkout',cart.total_price/100); window.location.href=url||'/checkout'; }
         catch(e){ btn.disabled=false; btn.innerHTML=origHtml; }
         return;
       }
