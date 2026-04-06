@@ -497,25 +497,48 @@ if (!nextT) {
   rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
 }
 
-        let barHtml = '<div style="position:relative;height:' + (v.rewards_bar_height||8) + 'px;margin-bottom:24px;background:' + (v.rewards_bar_bg_color||'#e5e7eb') + ';border-radius:99px;overflow:visible;">';
-        const maxVal = sorted[sorted.length-1].minimum_value || 1;
-        const totalPct = Math.min(100, (simValue / maxVal) * 100);
-        barHtml += '<div style="position:absolute;left:0;top:0;height:100%;width:' + totalPct + '%;background:' + (v.rewards_bar_fg_color||'#22c55e') + ';border-radius:99px;transition:width 0.3s;"></div>';
-        sorted.forEach((tier, idx) => {
-          const reached = simValue >= tier.minimum_value;
-          const leftPct = Math.min(100, (tier.minimum_value / maxVal) * 100);
-          const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
-          const circleSize = reached ? 28 : 22;
-          const label = tier.reward_description || tier.reward_type || '';
-          barHtml += '<div style="position:absolute;left:' + leftPct + '%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;z-index:2;">';
-          barHtml += '<div style="width:' + circleSize + 'px;height:' + circleSize + 'px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;' + (reached ? 'background:' + (v.rewards_complete_icon_color||v.rewards_bar_fg_color||'#22c55e') + ';color:#fff;' : 'background:#fff;border:2px solid ' + (v.rewards_incomplete_icon_color||'#d1d5db') + ';color:' + (v.rewards_incomplete_icon_color||'#d1d5db') + ';') + '">';
-          barHtml += reached ? iconSvg : '<span style="font-size:10px;">' + (idx+1) + '</span>';
-          barHtml += '</div>';
-          barHtml += '<span style="font-size:9px;color:#888;margin-top:4px;white-space:nowrap;text-align:center;max-width:60px;overflow:hidden;text-overflow:ellipsis;">' + label + '</span>';
-          barHtml += '</div>';
-        });
-        barHtml += '</div>';
-        rwEl.innerHTML = '<div style="padding:12px 16px;"><div style="font-size:' + (v.rewards_font_size||13) + 'px;text-align:center;margin-bottom:8px;">' + rawText + '</div>' + barHtml + '</div>';
+        // === INÍCIO DO BLOCO DE REWARDS ===
+let barHtml = '<div style="display:flex;align-items:center;gap:0;">';
+sorted.forEach((tier, idx) => {
+  const segStart = idx === 0 ? 0 : sorted[idx - 1].minimum_value;
+  const segEnd = tier.minimum_value;
+  const segRange = segEnd - segStart;
+  const lp = segRange > 0 ? Math.min(Math.max((simValue - segStart) / segRange, 0), 1) * 100 : (simValue >= segEnd ? 100 : 0);
+  const reached = simValue >= tier.minimum_value;
+  const iconSvg = SVG_ICONS[tier.icon || 'gift'] || SVG_ICONS.gift;
+  const circleSize = reached ? 28 : 22;
+
+  // Segmento da barra
+  barHtml += '<div style="flex:1;border-radius:9999px;overflow:hidden;height:' + (v.rewards_bar_height||8) + 'px;background:' + (v.rewards_bar_bg_color||'#e5e7eb') + ';">';
+  barHtml += '<div style="height:100%;border-radius:9999px;width:' + lp + '%;background:' + (v.rewards_bar_fg_color||'#22c55e') + ';transition:width 0.3s;"></div>';
+  barHtml += '</div>';
+
+  // Círculo do tier
+  barHtml += '<div style="flex-shrink:0;width:' + circleSize + 'px;height:' + circleSize + 'px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;';
+  if (reached) {
+    barHtml += 'background:' + (v.rewards_bar_fg_color||'#22c55e') + ';color:' + (v.rewards_complete_icon_color||'#fff') + ';">';
+    barHtml += iconSvg;
+  } else {
+    barHtml += 'background:' + (v.rewards_bar_bg_color||'#e5e7eb') + ';">';
+    barHtml += '<span style="display:block;width:8px;height:8px;border-radius:50%;background:' + (v.rewards_incomplete_icon_color||'#d1d5db') + ';opacity:0.4;"></span>';
+  }
+  barHtml += '</div>';
+});
+barHtml += '</div>';
+
+// Labels
+let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:2px;">';
+sorted.forEach((tier) => {
+  labelsHtml += '<div style="flex:1;"></div>';
+  labelsHtml += '<div style="flex-shrink:0;margin:0 2px;text-align:center;"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500;white-space:nowrap;">' + (tier.reward_description || tier.reward_type || '') + '</span></div>';
+});
+labelsHtml += '</div>';
+
+rwEl.innerHTML = '<div style="padding:10px 16px 8px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;">'
+  + '<div style="text-align:center;margin-bottom:6px;font-size:' + (v.rewards_font_size||13) + 'px;min-height:40px;display:flex;align-items:center;justify-content:center;">' + rawText + '</div>'
+  + barHtml + labelsHtml
+  + '</div>';
+// === FIM DO BLOCO DE REWARDS ===
       }
     }
 
