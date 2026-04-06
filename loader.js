@@ -301,22 +301,17 @@
             ${SVG_ICONS.close(closeSw)}
           </button>
         </div>
-<div id="cf-body">
-        <div id="cf-footer">
-          <div id="cf-badges-top"></div>
-          <div class="cf-footer-inner" style="padding:12px 16px;">
-            <div id="cf-discounts-row" style="display:none;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:8px;"></div>
-            <div id="cf-subtotal-row" style="display:flex;justify-content:space-between;font-size:15px;margin-bottom:8px;">
-              <span style="font-weight:500">Subtotal:</span>
-              <span id="cf-subtotal" style="font-weight:700"></span>
-            </div>
-            <button id="cf-checkout">${SVG_ICONS.lock} Secure Checkout</button>
-            <div id="cf-continue-wrap"></div>
-            <div id="cf-express-wrap"></div>
-          </div>
-          <div id="cf-badges-bottom"></div>
-        </div>
-      </div>
+<div id="cf-body" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+  <div id="cf-ann-before" style="flex-shrink:0;"></div>
+  <div id="cf-rewards" style="flex-shrink:0;"></div>
+  <div id="cf-scroll-area" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;">
+    <div id="cf-upsells-top"></div>
+    <div id="cf-items"></div>
+    <div id="cf-ann-after"></div>
+    <div id="cf-upsells-bottom"></div>
+    <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
+  </div>
+</div>
     `;
     document.body.appendChild(overlay);
 
