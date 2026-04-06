@@ -271,6 +271,9 @@ let _lastCart = null;
         box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
         transition: background-color 0.15s ease, opacity 0.15s ease !important;
       }
+      #cf-overlay *, #cf-drawer * { box-sizing:border-box !important; }
+#cf-drawer *::before, #cf-drawer *::after,
+#cf-overlay *::before, #cf-overlay *::after { content:none !important; display:none !important; }
       @keyframes cf-spin { to { transform: rotate(360deg); } }
       @media (max-width:480px) { #cf-drawer { width:${mw};right:-${mw}; } }
     `;
