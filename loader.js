@@ -563,7 +563,8 @@ if (!nextT) {
           return `
             <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
               <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;">
-                <img src="${item.image||item.featured_image?.url||'/placeholder.svg'}" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" />
+                <img src="${item.image||item.featured_image?.url||''}"
+onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" />
               </div>
               <div style="flex:1;min-width:0">
                 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
