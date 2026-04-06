@@ -248,9 +248,13 @@ let _lastCart = null;
         background:${footerBg} !important;
         color:${contrastText(footerBg)};
       }
-      cart-drawer,cart-notification,.cart-drawer,.cart-notification,#cart-drawer,#CartDrawer,
-      #cart-notification,[id*="cart-drawer"],[class*="cart-drawer"],drawer-component[id*="cart"],
-      .shopify-section-cart-drawer { display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
+cart-drawer,cart-notification,.cart-drawer,.cart-notification,#cart-drawer,#CartDrawer,
+#cart-notification,[id*="cart-drawer"],[class*="cart-drawer"],drawer-component[id*="cart"],
+.shopify-section-cart-drawer,.mini-cart,.js-mini-cart,#mini-cart-wrapper,
+.cart-flyout,.header-cart-flyout,.drawer--cart,#CartSpecialDrawer,
+.ajaxcart,.ajax-cart,[data-cart-drawer],[data-mini-cart],
+.side-cart,.slide-cart,.cart-sidebar
+{ display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
       #cf-checkout {
         all: unset !important;
         box-sizing: border-box !important;
@@ -864,7 +868,17 @@ btn.innerHTML = `<svg style="animation:cf-spin 0.8s linear infinite;width:18px;h
         catch(e){ btn.disabled=false; btn.innerHTML=origHtml; }
         return;
       }
-      const triggers=['[href="/cart"]','.cart-icon-bubble','[data-cart-toggle]','.header__icon--cart','[aria-label="Cart"]','[aria-label="Open cart"]','.cart-count-bubble','#cart-icon-bubble'];
+const triggers = [
+  '[href="/cart"]', '.cart-icon-bubble', '[data-cart-toggle]',
+  '.header__icon--cart', '[aria-label="Cart"]', '[aria-label="Open cart"]',
+  '.cart-count-bubble', '#cart-icon-bubble',
+  '.js-cart-toggle', '.cart-link', '.site-header__cart',
+  '.Header__CartIcon', '[data-action="toggle-cart"]',
+  '.cart-toggle', '#mini-cart', '.js-drawer-open-right',
+  '.cart-page-link', '.header-cart-btn', '.icon-cart',
+  '.pagefly-btn-addtocart', '[data-pf-type="ProductATC"]',
+  'a[href*="/cart"]', 'button[class*="cart"]'
+];
 if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
   e.preventDefault(); e.stopPropagation();
   // Mostrar cache instantaneamente
