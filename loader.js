@@ -310,7 +310,7 @@ let _lastCart = null;
           <div id="cf-items"></div>
           <div id="cf-ann-after"></div>
           <div id="cf-upsells-bottom"></div>
-          <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
+          <div id="cf-addon-section" style="padding-bottom:16px"></div>
         </div>
         <div id="cf-footer">
           <div id="cf-badges-top"></div>
@@ -628,8 +628,7 @@ ${(p.image_url || p.variants?.[0]?.image_url) ? `<div style="width:80px;height:8
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
                       ${variantHtml}
-                      <button onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>
-                    </div>
+<button id="cf-upsell-btn-${p.id}" onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>                    </div>
                   </div>
                 </div>`;
             }).join('')}
@@ -780,8 +779,10 @@ window.cfQty = async (key, qty) => {
 };
 
   // ── Add Upsell ──
-  window.cfAddUpsell = async (productId) => {
-    if (!productId) return;
+window.cfAddUpsell = async (productId) => {
+  if (!productId) return;
+  const btn = document.getElementById(`cf-upsell-btn-${productId}`);
+  if (btn) { btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; }
     const upsells = window._cfConfig?.upsells || [];
     const product = upsells.find(p => p.id === productId);
     if (!product) { console.warn('[CartFlow] Upsell not found:', productId); return; }
@@ -812,13 +813,17 @@ window.cfQty = async (key, qty) => {
       if (!res.ok) { console.warn('[CartFlow] Failed:', await res.text()); return; }
     } catch(e) { console.warn('[CartFlow] Add error:', e); return; }
 
-    const cart = await fetchShopifyCart();
+const cart = await fetchShopifyCart();
     if (window._cfConfig) {
       _lastSkus = '';
       await fetchUpsells(cart);
+      window._lastCart = cart;
       renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
+    // Restaurar botão após renderCart (busca novamente pois o DOM foi reconstruído)
+    const btnAfter = document.getElementById(`cf-upsell-btn-${productId}`);
+    if (btnAfter) { btnAfter.style.opacity = '0.85'; btnAfter.style.pointerEvents = 'auto'; }
   };
 
   window.closeCart = closeCart;
@@ -845,7 +850,55 @@ window.cfQty = async (key, qty) => {
       }
       return result;
     };
+// Interceptar XMLHttpRequest (PageFly usa XHR)
+const origXHROpen = XMLHttpRequest.prototype.open;
+const origXHRSend = XMLHttpRequest.prototype.send;
+XMLHttpRequest.prototype.open = function(method, url, ...args) {
+  this._cfUrl = String(url);
+  return origXHROpen.apply(this, [method, url, ...args]);
+};
+XMLHttpRequest.prototype.send = function(...args) {
+  const url = this._cfUrl || '';
+  if (url.includes('/cart/add') && !url.includes('_cf=1')) {
+    this.addEventListener('load', async () => {
+      try {
+        const cart = await fetchShopifyCart();
+        if (_cartReady && window._cfConfig) {
+          _lastSkus = '';
+          await fetchUpsells(cart);
+          window._lastCart = cart;
+          renderCart(cart, window._cfConfig);
+          openCart();
+        } else { _pendingOpen = true; }
+      } catch(e) {}
+    });
+  }
+  return origXHRSend.apply(this, args);
+};
 
+// Interceptar form submit (PageFly usa form)
+document.addEventListener('submit', async (e) => {
+  const form = e.target;
+  if (form.action && form.action.includes('/cart/add')) {
+    e.preventDefault();
+    e.stopPropagation();
+    const formData = new FormData(form);
+    try {
+      await (window._cfOrigFetch||fetch)('/cart/add.js', {
+        method: 'POST',
+        body: formData
+      });
+      const cart = await fetchShopifyCart();
+      if (_cartReady && window._cfConfig) {
+        _lastSkus = '';
+        await fetchUpsells(cart);
+        window._lastCart = cart;
+        renderCart(cart, window._cfConfig);
+        openCart();
+      } else { _pendingOpen = true; }
+    } catch(e) {}
+  }
+}, true);
     document.addEventListener('click', async (e) => {
       const t = e.target;
       if (t.id==='cf-close'||t.closest('#cf-close')||t.id==='cf-overlay') { closeCart(); return; }
@@ -859,7 +912,7 @@ btn.innerHTML = `<svg style="animation:cf-spin 0.8s linear infinite;width:18px;h
         catch(e){ btn.disabled=false; btn.innerHTML=origHtml; }
         return;
       }
-      const triggers=['[href="/cart"]','.cart-icon-bubble','[data-cart-toggle]','.header__icon--cart','[aria-label="Cart"]','[aria-label="Open cart"]','.cart-count-bubble','#cart-icon-bubble'];
+     const triggers=['[href="/cart"]','.cart-icon-bubble','[data-cart-toggle]','.header__icon--cart','[aria-label="Cart"]','[aria-label="Open cart"]','.cart-count-bubble','#cart-icon-bubble'];
 if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
   e.preventDefault(); e.stopPropagation();
   // Mostrar cache instantaneamente
