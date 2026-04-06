@@ -765,12 +765,13 @@ discRow.innerHTML = `
   };
 
   // ── Global Functions ──
-  window.cfQty = async (key, qty) => {
-    if (qty < 0) return;
-    await (window._cfOrigFetch||fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
-    const cart = await fetchShopifyCart();
-    if (window._cfConfig) renderCart(cart, window._cfConfig);
-  };
+window.cfQty = async (key, qty) => {
+  if (qty < 0) return;
+  await (window._cfOrigFetch||fetch)('/cart/change.js', ...);
+  const cart = await fetchShopifyCart();
+  window._lastCart = cart;
+  if (window._cfConfig) renderCart(cart, window._cfConfig);
+};
 
   // ── Add Upsell ──
   window.cfAddUpsell = async (productId) => {
