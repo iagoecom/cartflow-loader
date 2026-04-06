@@ -866,7 +866,7 @@ if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
   window._lastCart = cart;
   if(window._cfConfig) renderCart(cart, window._cfConfig);
 }
-}, { passive: false, capture: false });
+}, { passive: false, capture: true });
   }
 
   // ── Init ──
