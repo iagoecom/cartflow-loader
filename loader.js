@@ -12,7 +12,7 @@
   let _spActive = false;
   let _gwActive = false;
   let _lastSkus = '';
-  let _vitrineSkuMap = null; // Cache do SKU map da loja vitrine
+  let _vitrineSkuMap = null;
 
   function onCartReady() {
     _cartReady = true;
@@ -102,7 +102,7 @@
     } catch(e) { return null; }
   }
 
-  // ── Vitrine SKU Map (cache) ──
+  // ── Vitrine SKU Map (cache) — guarda id + compare_at_price ──
   async function getVitrineSkuMap() {
     if (_vitrineSkuMap) return _vitrineSkuMap;
     try {
@@ -113,8 +113,14 @@
         const data = await res.json();
         if (!data.products || data.products.length === 0) break;
         for (const p of data.products) {
-          for (const v of p.variants) {
-            if (v.sku) _vitrineSkuMap[v.sku] = v.id;
+          for (const vr of p.variants) {
+            if (vr.sku) {
+              _vitrineSkuMap[vr.sku] = {
+                id: vr.id,
+                price: parseFloat(vr.price || '0'),
+                compare_at_price: vr.compare_at_price ? parseFloat(vr.compare_at_price) : null
+              };
+            }
           }
         }
         if (data.products.length < 250) break;
@@ -217,6 +223,7 @@
   function injectStyles(v) {
     const dw = getDrawerWidth(v);
     const mw = v.cart_width_mobile === 'default' ? '90vw' : '100vw';
+    const footerBg = v.accent_color || '#f6f6f7';
     const style = document.createElement('style');
     style.id = 'cartflow-styles';
     style.textContent = `
@@ -233,6 +240,13 @@
       #cf-body { flex:1;overflow-y:auto;display:flex;flex-direction:column; }
       .cf-empty { text-align:center;padding:48px 16px;color:#999; }
       .cf-empty-icon { font-size:40px;margin-bottom:12px; }
+      /* FIX 4: Rodapé sempre com a cor accent configurada */
+      #cf-footer {
+        flex-shrink:0;
+        border-top:1px solid rgba(0,0,0,0.08);
+        background:${footerBg} !important;
+        color:${contrastText(footerBg)};
+      }
       cart-drawer,cart-notification,.cart-drawer,.cart-notification,#cart-drawer,#CartDrawer,
       #cart-notification,[id*="cart-drawer"],[class*="cart-drawer"],drawer-component[id*="cart"],
       .shopify-section-cart-drawer { display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
@@ -296,7 +310,7 @@
           <div id="cf-upsells-bottom"></div>
           <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
         </div>
-        <div id="cf-footer" style="flex-shrink:0;border-top:1px solid rgba(0,0,0,0.08);">
+        <div id="cf-footer">
           <div id="cf-badges-top"></div>
           <div class="cf-footer-inner" style="padding:12px 16px;">
             <div id="cf-discounts-row" style="display:none;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:8px;"></div>
@@ -395,9 +409,11 @@
     const accentColor = v.accent_color || '#f6f6f7';
     const accentTextColor = contrastText(accentColor);
 
+    // Title
     const titleEl = document.getElementById('cf-title-el');
     if (titleEl) titleEl.textContent = (v.header_title_text||'Cart • {{cart_quantity}}').replace('{{cart_quantity}}', count);
 
+    // Announcement
     const annBefore = document.getElementById('cf-ann-before');
     const annAfter = document.getElementById('cf-ann-after');
     if (annBefore) annBefore.innerHTML = '';
@@ -417,6 +433,10 @@
       }
     }
 
+    // ── Rewards ──
+    // FIX 1: rewards_calculation=quantity com 1 item mostrava "Add 2 more"
+    // porque o tier_order=1 tem minimum_value=1, então com simValue=1 já está
+    // desbloqueado. O nextT deve ser o próximo tier NÃO desbloqueado.
     const rwEl = document.getElementById('cf-rewards');
     const tiers = config.rewards || [];
     const showOnEmpty = v.rewards_show_on_empty !== false;
@@ -442,12 +462,16 @@
           if (!existing || amount > existing.amount) byType.set(tier.reward_type, { amount, label });
         }
         byType.forEach(({ amount, label }) => { rewardDiscount += amount; activeRewardLabels.push(label); });
-        const cidx = sorted.findIndex(t => simValue < t.minimum_value);
-        const nextT = cidx >= 0 ? sorted[cidx] : null;
-        const rem = nextT ? (isQty ? `${nextT.minimum_value-simValue}` : `$${(nextT.minimum_value-simValue).toFixed(0)}`) : null;
+
+        // FIX 1: nextT é o próximo tier com minimum_value > simValue (estritamente maior)
+        const nextT = sorted.find(t => t.minimum_value > simValue);
+        const rem = nextT ? (isQty ? `${nextT.minimum_value - simValue}` : `$${(nextT.minimum_value - simValue).toFixed(0)}`) : null;
         const rawText = nextT
-          ? (nextT.title_before || `Add {remaining} more to unlock ${nextT.reward_description||'the next reward'}`).replace('{remaining}', String(rem)).replace('{{count}}', String(totalQty))
+          ? (nextT.title_before || `Add {remaining} more to unlock ${nextT.reward_description||'the next reward'}`)
+              .replace('{remaining}', String(rem))
+              .replace('{{count}}', String(totalQty))
           : (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
+
         let barHtml = '<div style="display:flex;align-items:center;gap:0">';
         let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
         sorted.forEach((tier, idx) => {
@@ -470,6 +494,7 @@
       }
     }
 
+    // ── Items ──
     const itemsEl = document.getElementById('cf-items');
     if (itemsEl) {
       if (items.length === 0) {
@@ -480,17 +505,35 @@
         itemsEl.innerHTML = items.map((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
-          const lineCompare = (item.original_price||item.price) * item.quantity;
-          const lineCompareDollars = lineCompare / 100;
-const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
-const itemRewardDiscount = rewardDiscount * itemShare;
-const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
-const hasShopifyDiscount = item.original_price > item.price;
-const shopifyDiscountAmount = (item.original_price - item.price) * item.quantity / 100;
-const hasDis = hasShopifyDiscount || lineCompareDollars > discountedTotal;
-const totalSavingsItem = hasShopifyDiscount 
-  ? shopifyDiscountAmount + itemRewardDiscount
-  : lineCompareDollars - discountedTotal;
+
+          // FIX 3: Usar compare_at_price do vitrine SKU map para detectar desconto
+          const vitrineEntry = _vitrineSkuMap?.[item.sku];
+          const compareAtPriceDollars = vitrineEntry?.compare_at_price
+            ? vitrineEntry.compare_at_price * item.quantity
+            : null;
+
+          // Fallback: usar original_price do Shopify se disponível
+          const shopifyOrigCents = item.original_price || item.price;
+          const shopifyOrigDollars = shopifyOrigCents * item.quantity / 100;
+
+          // Preço de comparação: prefere compare_at_price do vitrine
+          const lineCompareDollars = compareAtPriceDollars || shopifyOrigDollars;
+
+          const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
+          const itemRewardDiscount = rewardDiscount * itemShare;
+          const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
+
+          // Tem desconto se compare > preço atual OU reward aplicou desconto
+          const hasCompareDiscount = lineCompareDollars > lineTotalDollars;
+          const hasRewardDiscount = itemRewardDiscount > 0;
+          const hasDis = hasCompareDiscount || hasRewardDiscount;
+
+          // Preço a mostrar: se tem reward, aplica sobre preço atual
+          const displayPrice = hasRewardDiscount ? discountedTotal : lineTotalDollars;
+
+          // Economia total
+          const totalSavingsItem = lineCompareDollars - displayPrice;
+
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
@@ -500,6 +543,7 @@ const totalSavingsItem = hasShopifyDiscount
             variantLabel = item.variant_title;
           }
           const borderBottom = idx < items.length-1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
+
           return `
             <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
               <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;">
@@ -513,16 +557,16 @@ const totalSavingsItem = hasShopifyDiscount
                 <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px">
                   <div style="display:flex;flex-direction:column;gap:4px">
                     ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
-<div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px;overflow:hidden;width:fit-content;">
-<span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
-<span style="box-sizing:border-box;font-size:13px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
-<span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
+                    <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px;overflow:hidden;width:fit-content;">
+                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
+                      <span style="box-sizing:border-box;font-size:13px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
+                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                     </div>
                   </div>
                   <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
-${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
-<span style="font-size:16px;font-weight:700">${formatPriceDollars(hasShopifyDiscount ? lineTotalDollars : discountedTotal)}</span>
-${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.savings_color||'#22c55e'}">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
+                    ${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
+                    <span style="font-size:16px;font-weight:700">${formatPriceDollars(displayPrice)}</span>
+                    ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<span style="font-size:11px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;margin-top:2px;">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
                   </div>
                 </div>
               </div>
@@ -531,6 +575,7 @@ ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.
       }
     }
 
+    // ── Upsells ──
     const upsells = config.upsells || [];
     const topEl = document.getElementById('cf-upsells-top');
     const btmEl = document.getElementById('cf-upsells-bottom');
@@ -569,6 +614,7 @@ ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.
       if (target) target.innerHTML = html;
     }
 
+    // ── Add-ons ──
     const addonEl = document.getElementById('cf-addon-section');
     if (addonEl) {
       addonEl.innerHTML = '';
@@ -589,21 +635,42 @@ ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.
       if (addonHtml) addonEl.innerHTML = addonHtml;
     }
 
+    // FIX 2: Trust badges — verificar todas as condições corretamente
     const badgesTop = document.getElementById('cf-badges-top');
     const badgesBot = document.getElementById('cf-badges-bottom');
     if (badgesTop) badgesTop.innerHTML = '';
     if (badgesBot) badgesBot.innerHTML = '';
     if (v.trust_badges_enabled) {
-      const badgeImgUrl = v.trust_badges_image_url||'';
-      const badgeSize = v.trust_badges_image_size||40;
-      const badgePos = v.trust_badges_position||'below';
+      const badgeImgUrl = v.trust_badges_image_url || '';
+      const badgePreset = v.trust_badges_preset || '';
+      const badgeSize = v.trust_badges_image_size || 100;
+      const badgePos = v.trust_badges_position || 'below';
+
+      // Preset images hospedadas no Supabase
+      const PRESET_IMAGES = {
+        payment_icons: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/payment-icons-transparent.png',
+        returns_warranty: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/free-return-guarantee-transparent.png',
+      };
+
       let badgeHtml = '';
-      if (badgeImgUrl) badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${badgeImgUrl}" alt="Trust Badge" style="max-height:${badgeSize}px;max-width:100%;object-fit:contain"/></div>`;
-      else if (PRESETS[v.trust_badges_preset]) badgeHtml = `<div style="text-align:center;padding:8px 16px;font-size:11px;opacity:0.6">${SVG_ICONS.shield} ${PRESETS[v.trust_badges_preset]}</div>`;
-      const target = badgePos==='above' ? badgesTop : badgesBot;
-      if (target && badgeHtml) target.innerHTML = badgeHtml;
+      if (badgeImgUrl) {
+        // Imagem customizada
+        badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${badgeImgUrl}" alt="Trust Badge" style="width:${badgeSize}%;max-width:100%;object-fit:contain;display:block;margin:0 auto"/></div>`;
+      } else if (PRESET_IMAGES[badgePreset]) {
+        // Imagem preset do Supabase
+        badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${PRESET_IMAGES[badgePreset]}" alt="Trust Badge" style="width:${badgeSize}%;max-width:100%;object-fit:contain;display:block;margin:0 auto"/></div>`;
+      } else if (PRESETS[badgePreset]) {
+        // Texto preset fallback
+        badgeHtml = `<div style="text-align:center;padding:8px 16px;font-size:11px;opacity:0.6">${SVG_ICONS.shield} ${PRESETS[badgePreset]}</div>`;
+      }
+
+      if (badgeHtml) {
+        const target = badgePos === 'above' ? badgesTop : badgesBot;
+        if (target) target.innerHTML = badgeHtml;
+      }
     }
 
+    // ── Subtotal ──
     const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
     const rawSubtotalDollars = rawSubtotalCents / 100;
     let addonTotal = 0;
@@ -616,12 +683,22 @@ ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.
     const subtotalEl = document.getElementById('cf-subtotal');
     if (subtotalEl) subtotalEl.textContent = formatPriceDollars(finalSubtotal);
 
+    // FIX 5: Tags de desconto com layout correto (badge estilizado)
     const discRow = document.getElementById('cf-discounts-row');
     if (discRow) {
       if (rewardDiscount > 0 && activeRewardLabels.length > 0) {
         discRow.style.display = 'flex';
-        discRow.innerHTML = `<span style="color:${v.savings_color||'#22c55e'};font-weight:500">${activeRewardLabels.join(' + ')}</span><span style="color:${v.savings_color||'#22c55e'};font-weight:600">-${formatPriceDollars(rewardDiscount)}</span>`;
-      } else { discRow.style.display = 'none'; discRow.innerHTML = ''; }
+        const badges = activeRewardLabels.map(label =>
+          `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;background:${v.savings_color||'#22c55e'}20;color:${v.savings_color||'#22c55e'};border:1px solid ${v.savings_color||'#22c55e'}40">${SVG_ICONS.tag} ${label}</span>`
+        ).join('');
+        discRow.innerHTML = `
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${badges}</div>
+          <span style="color:${v.savings_color||'#22c55e'};font-weight:700;white-space:nowrap">-${formatPriceDollars(rewardDiscount)}</span>
+        `;
+      } else {
+        discRow.style.display = 'none';
+        discRow.innerHTML = '';
+      }
     }
 
     const subtotalRow = document.getElementById('cf-subtotal-row');
@@ -668,19 +745,16 @@ ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.
     if (qty < 0) return;
     await (window._cfOrigFetch||fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
     const cart = await fetchShopifyCart();
-   if (window._cfConfig) {
-  renderCart(cart, window._cfConfig);
-}
+    if (window._cfConfig) renderCart(cart, window._cfConfig);
   };
 
-  // ── Add Upsell — busca variant_id na loja vitrine pelo SKU (com cache) ──
+  // ── Add Upsell ──
   window.cfAddUpsell = async (productId) => {
     if (!productId) return;
     const upsells = window._cfConfig?.upsells || [];
     const product = upsells.find(p => p.id === productId);
     if (!product) { console.warn('[CartFlow] Upsell not found:', productId); return; }
 
-    // Pegar SKU da variante selecionada
     const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
     const wrapper = card?.querySelector('[data-cf-selected-sku]');
     let selectedSku = wrapper?.getAttribute('data-cf-selected-sku') || '';
@@ -689,16 +763,14 @@ ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.
     }
     if (!selectedSku) { console.warn('[CartFlow] No SKU for upsell:', product.title); return; }
 
-    // Buscar variant_id na loja VITRINE (com cache)
     const vitrineMap = await getVitrineSkuMap();
-    const vitrineVariantId = vitrineMap[selectedSku];
+    const vitrineEntry = vitrineMap[selectedSku];
+    const vitrineVariantId = vitrineEntry?.id || vitrineEntry;
 
     if (!vitrineVariantId) {
       console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku);
       return;
     }
-
-    console.log('[CartFlow] Adicionando upsell:', selectedSku, '→', vitrineVariantId);
 
     try {
       const res = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
@@ -711,7 +783,9 @@ ${totalSavingsItem > 0 ? `<span style="font-size:13px;font-weight:600;color:${v.
 
     const cart = await fetchShopifyCart();
     if (window._cfConfig) {
-renderCart(cart, window._cfConfig);
+      _lastSkus = '';
+      await fetchUpsells(cart);
+      renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
   };
@@ -720,7 +794,7 @@ renderCart(cart, window._cfConfig);
 
   // ── Intercept ──
   function interceptCart() {
-    window._cfOrigFetch = window.fetch;
+    if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
       const result = await window._cfOrigFetch.apply(window, args);
@@ -759,35 +833,33 @@ renderCart(cart, window._cfConfig);
       if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
         e.preventDefault(); e.stopPropagation();
         const cart=await fetchShopifyCart();
-   if(window._cfConfig) {
-  renderCart(cart, window._cfConfig);
-}
-openCart();
+        if(window._cfConfig) renderCart(cart, window._cfConfig);
+        openCart();
       }
     }, true);
   }
 
   // ── Init ──
   try {
+    // Salvar fetch original ANTES de tudo
+    if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
+
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
 
-// Interceptar ANTES de tudo
-if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
-const [config] = await Promise.all([
-  getConfig(initialSkus),
-  getVitrineSkuMap()
-]);
-if (!config) { console.warn('[CartFlow] Config not found'); return; }
-window._cfConfig = config;
+    // Carregar config e vitrine SKU map em paralelo
+    const [config] = await Promise.all([
+      getConfig(initialSkus),
+      getVitrineSkuMap()
+    ]);
+
+    if (!config) { console.warn('[CartFlow] Config not found'); return; }
+    window._cfConfig = config;
 
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
     interceptCart();
-
-    // Pré-carregar vitrine SKU map em background
-    getVitrineSkuMap().then(() => console.log('[CartFlow] Vitrine map ready'));
 
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
     renderCart(initialCart, config);
