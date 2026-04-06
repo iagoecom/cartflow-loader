@@ -705,7 +705,19 @@ onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;heig
     if (discRow) {
 if (activeRewardLabels.length > 0) {
         discRow.style.display = 'flex';
-        const badges = activeRewardLabels.map(label =>
+const savingsColor = v.savings_color || '#16a34a';
+const tagSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>';
+const badges = activeRewardLabels.map(label =>
+  `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:9999px;font-size:10px;font-weight:600;text-transform:uppercase;border:1px solid ${savingsColor};color:${savingsColor};background:transparent">${tagSvg} ${label}</span>`
+).join(' ');
+discRow.style.display = 'flex';
+discRow.innerHTML = `
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <span style="color:${savingsColor};font-weight:500;font-size:12px">Discounts</span>
+    ${badges}
+  </div>
+  ${rewardDiscount > 0 ? `<span style="color:${savingsColor};font-weight:700;white-space:nowrap">-${formatPriceDollars(rewardDiscount)}</span>` : ''}
+`;
           `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;background:${v.savings_color||'#22c55e'}20;color:${v.savings_color||'#22c55e'};border:1px solid ${v.savings_color||'#22c55e'}40">${SVG_ICONS.tag} ${label}</span>`
         ).join('');
 discRow.innerHTML = `
