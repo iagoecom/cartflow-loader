@@ -400,7 +400,14 @@ let _lastCart = null;
       const vrKey = (vr.option_value||'').split('/').map(p => p.trim()).join(' / ');
       return vrKey === selectedKey;
     });
-    if (match?.sku) wrapper.setAttribute('data-cf-selected-sku', match.sku);
+if (match?.sku) {
+  wrapper.setAttribute('data-cf-selected-sku', match.sku);
+  if (match.image_url) {
+    const card = wrapper.closest('[data-cf-upsell-card]');
+    const img = card?.querySelector('img');
+    if (img) img.src = match.image_url;
+  }
+}
   };
 
   // ── Render ──
