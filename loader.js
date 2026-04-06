@@ -578,9 +578,7 @@ onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;heig
               <div style="flex:1;min-width:0">
 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
   <p style="font-size:15px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0">${productTitle}</p>
-</div>
-<div style="display:flex;justify-content:flex-end">
-  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
+  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;flex-shrink:0;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;align-self:flex-end" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
 </div>
                 <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px">
                   <div style="display:flex;flex-direction:column;gap:4px">
