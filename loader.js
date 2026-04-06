@@ -12,7 +12,8 @@
   let _spActive = false;
   let _gwActive = false;
   let _lastSkus = '';
-  let _vitrineSkuMap = null;
+let _vitrineSkuMap = null;
+let _lastCart = null;
 
   function onCartReady() {
     _cartReady = true;
@@ -854,9 +855,14 @@ discRow.innerHTML = `
       const triggers=['[href="/cart"]','.cart-icon-bubble','[data-cart-toggle]','.header__icon--cart','[aria-label="Cart"]','[aria-label="Open cart"]','.cart-count-bubble','#cart-icon-bubble'];
 if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
   e.preventDefault(); e.stopPropagation();
-  // Abrir imediatamente e buscar dados em seguida
+  // Mostrar cache instantaneamente
+  if(window._cfConfig && window._lastCart) {
+    renderCart(window._lastCart, window._cfConfig);
+  }
   openCart();
-  const cart=await fetchShopifyCart();
+  // Atualizar em background
+  const cart = await fetchShopifyCart();
+  window._lastCart = cart;
   if(window._cfConfig) renderCart(cart, window._cfConfig);
 }
 }, { passive: false, capture: false });
@@ -884,8 +890,9 @@ getVitrineSkuMap();
     interceptCart();
 
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
-    renderCart(initialCart, config);
-    onCartReady();
+window._lastCart = initialCart;
+renderCart(initialCart, config);
+onCartReady();
 
     trackEvent('cart_impression');
     console.log('[CartFlow] ✓ Loaded');
