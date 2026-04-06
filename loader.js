@@ -497,25 +497,25 @@ if (!nextT) {
   rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
 }
 
-        let barHtml = '<div style="display:flex;align-items:center;gap:0">';
-        let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
+        let barHtml = '<div style="position:relative;height:' + (v.rewards_bar_height||8) + 'px;margin-bottom:24px;background:' + (v.rewards_bar_bg_color||'#e5e7eb') + ';border-radius:99px;overflow:visible;">';
+        const maxVal = sorted[sorted.length-1].minimum_value || 1;
+        const totalPct = Math.min(100, (simValue / maxVal) * 100);
+        barHtml += '<div style="position:absolute;left:0;top:0;height:100%;width:' + totalPct + '%;background:' + (v.rewards_bar_fg_color||'#22c55e') + ';border-radius:99px;transition:width 0.3s;"></div>';
         sorted.forEach((tier, idx) => {
-          const segStart = idx===0 ? 0 : sorted[idx-1].minimum_value;
-          const segEnd = tier.minimum_value;
-          const segRange = segEnd - segStart;
-          const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
           const reached = simValue >= tier.minimum_value;
+          const leftPct = Math.min(100, (tier.minimum_value / maxVal) * 100);
           const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
-          const circleSize = reached ? 28 : 20;
-          barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'}"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'};transition:width 0.4s;width:${lp}%"></div></div>`;
-          barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'};color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'}">`;
-          barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
+          const circleSize = reached ? 28 : 22;
+          const label = tier.reward_description || tier.reward_type || '';
+          barHtml += '<div style="position:absolute;left:' + leftPct + '%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;z-index:2;">';
+          barHtml += '<div style="width:' + circleSize + 'px;height:' + circleSize + 'px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;' + (reached ? 'background:' + (v.rewards_complete_icon_color||v.rewards_bar_fg_color||'#22c55e') + ';color:#fff;' : 'background:#fff;border:2px solid ' + (v.rewards_incomplete_icon_color||'#d1d5db') + ';color:' + (v.rewards_incomplete_icon_color||'#d1d5db') + ';') + '">';
+          barHtml += reached ? iconSvg : '<span style="font-size:10px;">' + (idx+1) + '</span>';
           barHtml += '</div>';
-          labelsHtml += '<div style="flex:1"></div>';
-          labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
+          barHtml += '<span style="font-size:9px;color:#888;margin-top:4px;white-space:nowrap;text-align:center;max-width:60px;overflow:hidden;text-overflow:ellipsis;">' + label + '</span>';
+          barHtml += '</div>';
         });
-        barHtml += '</div>'; labelsHtml += '</div>';
-        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${v.rewards_font_size||14}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
+        barHtml += '</div>';
+        rwEl.innerHTML = '<div style="padding:12px 16px;"><div style="font-size:' + (v.rewards_font_size||13) + 'px;text-align:center;margin-bottom:8px;">' + rawText + '</div>' + barHtml + '</div>';
       }
     }
 
