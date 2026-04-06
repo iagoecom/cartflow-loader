@@ -497,48 +497,25 @@ if (!nextT) {
   rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
 }
 
-        // === INÍCIO DO BLOCO DE REWARDS ===
-let barHtml = '<div style="display:flex;align-items:center;gap:0;">';
-sorted.forEach((tier, idx) => {
-  const segStart = idx === 0 ? 0 : sorted[idx - 1].minimum_value;
-  const segEnd = tier.minimum_value;
-  const segRange = segEnd - segStart;
-  const lp = segRange > 0 ? Math.min(Math.max((simValue - segStart) / segRange, 0), 1) * 100 : (simValue >= segEnd ? 100 : 0);
-  const reached = simValue >= tier.minimum_value;
-  const iconSvg = SVG_ICONS[tier.icon || 'gift'] || SVG_ICONS.gift;
-  const circleSize = reached ? 28 : 22;
-
-  // Segmento da barra
-  barHtml += '<div style="flex:1;border-radius:9999px;overflow:hidden;height:' + (v.rewards_bar_height||8) + 'px;background:' + (v.rewards_bar_bg_color||'#e5e7eb') + ';">';
-  barHtml += '<div style="height:100%;border-radius:9999px;width:' + lp + '%;background:' + (v.rewards_bar_fg_color||'#22c55e') + ';transition:width 0.3s;"></div>';
-  barHtml += '</div>';
-
-  // Círculo do tier
-  barHtml += '<div style="flex-shrink:0;width:' + circleSize + 'px;height:' + circleSize + 'px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;';
-  if (reached) {
-    barHtml += 'background:' + (v.rewards_bar_fg_color||'#22c55e') + ';color:' + (v.rewards_complete_icon_color||'#fff') + ';">';
-    barHtml += iconSvg;
-  } else {
-    barHtml += 'background:' + (v.rewards_bar_bg_color||'#e5e7eb') + ';">';
-    barHtml += '<span style="display:block;width:8px;height:8px;border-radius:50%;background:' + (v.rewards_incomplete_icon_color||'#d1d5db') + ';opacity:0.4;"></span>';
-  }
-  barHtml += '</div>';
-});
-barHtml += '</div>';
-
-// Labels
-let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:2px;">';
-sorted.forEach((tier) => {
-  labelsHtml += '<div style="flex:1;"></div>';
-  labelsHtml += '<div style="flex-shrink:0;margin:0 2px;text-align:center;"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500;white-space:nowrap;">' + (tier.reward_description || tier.reward_type || '') + '</span></div>';
-});
-labelsHtml += '</div>';
-
-rwEl.innerHTML = '<div style="padding:10px 16px 8px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;">'
-  + '<div style="text-align:center;margin-bottom:6px;font-size:' + (v.rewards_font_size||13) + 'px;min-height:40px;display:flex;align-items:center;justify-content:center;">' + rawText + '</div>'
-  + barHtml + labelsHtml
-  + '</div>';
-// === FIM DO BLOCO DE REWARDS ===
+        let barHtml = '<div style="display:flex;align-items:center;gap:0">';
+        let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
+        sorted.forEach((tier, idx) => {
+          const segStart = idx===0 ? 0 : sorted[idx-1].minimum_value;
+          const segEnd = tier.minimum_value;
+          const segRange = segEnd - segStart;
+          const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
+          const reached = simValue >= tier.minimum_value;
+          const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
+          const circleSize = reached ? 28 : 20;
+          barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'}"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'};transition:width 0.4s;width:${lp}%"></div></div>`;
+          barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'};color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'}">`;
+          barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
+          barHtml += '</div>';
+          labelsHtml += '<div style="flex:1"></div>';
+          labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
+        });
+        barHtml += '</div>'; labelsHtml += '</div>';
+        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${v.rewards_font_size||14}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
       }
     }
 
