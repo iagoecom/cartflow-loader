@@ -471,13 +471,22 @@ for (const tier of unlockedTiers) {
 }
 
         // FIX 1: nextT é o próximo tier com minimum_value > simValue (estritamente maior)
-        const nextT = sorted.find(t => t.minimum_value > simValue);
-        const rem = nextT ? (isQty ? `${nextT.minimum_value - simValue}` : `$${(nextT.minimum_value - simValue).toFixed(0)}`) : null;
-        const rawText = nextT
-          ? (nextT.title_before || `Add {remaining} more to unlock ${nextT.reward_description||'the next reward'}`)
-              .replace('{remaining}', String(rem))
-              .replace('{{count}}', String(totalQty))
-          : (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
+const nextT = sorted.find(t => t.minimum_value > simValue);
+const rem = nextT ? (isQty ? `${nextT.minimum_value - simValue}` : `$${(nextT.minimum_value - simValue).toFixed(0)}`) : null;
+
+// Mostrar apenas 1 mensagem: próximo tier ou completo
+let rawText = '';
+if (!nextT) {
+  rawText = (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
+} else if (nextT.title_before) {
+  rawText = nextT.title_before
+    .replace('{remaining}', String(rem))
+    .replace('{{remaining}}', String(rem))
+    .replace('{{count}}', String(rem))
+    .replace('{count}', String(rem));
+} else {
+  rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
+}
 
         let barHtml = '<div style="display:flex;align-items:center;gap:0">';
         let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
