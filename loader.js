@@ -620,7 +620,7 @@ onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;heig
               const variantHtml = buildUpsellVariantHtml(p, v);
               return `
                 <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
-${p.image_url ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0"><img id="cf-upsell-img-${p.id}" src="${p.image_url}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}                  <div style="flex:1;min-width:0">
+${(p.image_url || p.variants?.[0]?.image_url) ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0"><img id="cf-upsell-img-${p.id}" src="${p.image_url || p.variants?.[0]?.image_url}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}                  <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
                     <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
                       ${hasCompare ? `<span style="font-size:12px;text-decoration:line-through;opacity:0.5">${formatPriceDollars(p.compare_price)}</span>` : ''}
