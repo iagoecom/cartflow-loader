@@ -859,7 +859,7 @@ if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
   const cart=await fetchShopifyCart();
   if(window._cfConfig) renderCart(cart, window._cfConfig);
 }
-    }, true);
+}, { passive: false, capture: false });
   }
 
   // ── Init ──
