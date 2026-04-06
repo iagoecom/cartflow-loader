@@ -461,7 +461,14 @@
           const existing = byType.get(tier.reward_type);
           if (!existing || amount > existing.amount) byType.set(tier.reward_type, { amount, label });
         }
-        byType.forEach(({ amount, label }) => { rewardDiscount += amount; activeRewardLabels.push(label); });
+       byType.forEach(({ amount, label }) => { rewardDiscount += amount; activeRewardLabels.push(label); });
+for (const tier of unlockedTiers) {
+  if (tier.reward_type === 'shipping' || tier.reward_type === 'free_shipping') {
+    if (!activeRewardLabels.includes(tier.reward_description)) {
+      activeRewardLabels.push(tier.reward_description);
+    }
+  }
+}
 
         // FIX 1: nextT é o próximo tier com minimum_value > simValue (estritamente maior)
         const nextT = sorted.find(t => t.minimum_value > simValue);
@@ -686,14 +693,14 @@
     // FIX 5: Tags de desconto com layout correto (badge estilizado)
     const discRow = document.getElementById('cf-discounts-row');
     if (discRow) {
-      if (rewardDiscount > 0 && activeRewardLabels.length > 0) {
+if (activeRewardLabels.length > 0) {
         discRow.style.display = 'flex';
         const badges = activeRewardLabels.map(label =>
           `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;background:${v.savings_color||'#22c55e'}20;color:${v.savings_color||'#22c55e'};border:1px solid ${v.savings_color||'#22c55e'}40">${SVG_ICONS.tag} ${label}</span>`
         ).join('');
         discRow.innerHTML = `
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${badges}</div>
-          <span style="color:${v.savings_color||'#22c55e'};font-weight:700;white-space:nowrap">-${formatPriceDollars(rewardDiscount)}</span>
+${rewardDiscount > 0 ? `<span style="color:${v.savings_color||'#22c55e'};font-weight:700;white-space:nowrap">-${formatPriceDollars(rewardDiscount)}</span>` : ''}
         `;
       } else {
         discRow.style.display = 'none';
