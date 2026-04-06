@@ -310,7 +310,7 @@ let _lastCart = null;
           <div id="cf-items"></div>
           <div id="cf-ann-after"></div>
           <div id="cf-upsells-bottom"></div>
-          <div id="cf-addon-section" style="padding-bottom:16px"></div>
+          <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
         </div>
         <div id="cf-footer">
           <div id="cf-badges-top"></div>
@@ -850,55 +850,7 @@ const cart = await fetchShopifyCart();
       }
       return result;
     };
-// Interceptar XMLHttpRequest (PageFly usa XHR)
-const origXHROpen = XMLHttpRequest.prototype.open;
-const origXHRSend = XMLHttpRequest.prototype.send;
-XMLHttpRequest.prototype.open = function(method, url, ...args) {
-  this._cfUrl = String(url);
-  return origXHROpen.apply(this, [method, url, ...args]);
-};
-XMLHttpRequest.prototype.send = function(...args) {
-  const url = this._cfUrl || '';
-  if (url.includes('/cart/add') && !url.includes('_cf=1')) {
-    this.addEventListener('load', async () => {
-      try {
-        const cart = await fetchShopifyCart();
-        if (_cartReady && window._cfConfig) {
-          _lastSkus = '';
-          await fetchUpsells(cart);
-          window._lastCart = cart;
-          renderCart(cart, window._cfConfig);
-          openCart();
-        } else { _pendingOpen = true; }
-      } catch(e) {}
-    });
-  }
-  return origXHRSend.apply(this, args);
-};
 
-// Interceptar form submit (PageFly usa form)
-document.addEventListener('submit', async (e) => {
-  const form = e.target;
-  if (form.action && form.action.includes('/cart/add')) {
-    e.preventDefault();
-    e.stopPropagation();
-    const formData = new FormData(form);
-    try {
-      await (window._cfOrigFetch||fetch)('/cart/add.js', {
-        method: 'POST',
-        body: formData
-      });
-      const cart = await fetchShopifyCart();
-      if (_cartReady && window._cfConfig) {
-        _lastSkus = '';
-        await fetchUpsells(cart);
-        window._lastCart = cart;
-        renderCart(cart, window._cfConfig);
-        openCart();
-      } else { _pendingOpen = true; }
-    } catch(e) {}
-  }
-}, true);
     document.addEventListener('click', async (e) => {
       const t = e.target;
       if (t.id==='cf-close'||t.closest('#cf-close')||t.id==='cf-overlay') { closeCart(); return; }
@@ -912,7 +864,7 @@ btn.innerHTML = `<svg style="animation:cf-spin 0.8s linear infinite;width:18px;h
         catch(e){ btn.disabled=false; btn.innerHTML=origHtml; }
         return;
       }
-     const triggers=['[href="/cart"]','.cart-icon-bubble','[data-cart-toggle]','.header__icon--cart','[aria-label="Cart"]','[aria-label="Open cart"]','.cart-count-bubble','#cart-icon-bubble'];
+      const triggers=['[href="/cart"]','.cart-icon-bubble','[data-cart-toggle]','.header__icon--cart','[aria-label="Cart"]','[aria-label="Open cart"]','.cart-count-bubble','#cart-icon-bubble'];
 if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
   e.preventDefault(); e.stopPropagation();
   // Mostrar cache instantaneamente
