@@ -237,7 +237,7 @@
         font-family:${v.inherit_fonts ? 'inherit' : 'system-ui,sans-serif'};
       }
       #cf-drawer.open { right:0; }
-      #cf-body { flex:1;overflow-y:auto;display:flex;flex-direction:column; }
+#cf-body { flex:1;overflow:hidden;display:flex;flex-direction:column; }
       .cf-empty { text-align:center;padding:48px 16px;color:#999; }
       .cf-empty-icon { font-size:40px;margin-bottom:12px; }
       /* FIX 4: Rodapé sempre com a cor accent configurada */
@@ -301,15 +301,7 @@
             ${SVG_ICONS.close(closeSw)}
           </button>
         </div>
-        <div id="cf-body">
-          <div id="cf-ann-before"></div>
-          <div id="cf-rewards"></div>
-          <div id="cf-upsells-top"></div>
-          <div id="cf-items"></div>
-          <div id="cf-ann-after"></div>
-          <div id="cf-upsells-bottom"></div>
-          <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
-        </div>
+<div id="cf-body">
         <div id="cf-footer">
           <div id="cf-badges-top"></div>
           <div class="cf-footer-inner" style="padding:12px 16px;">
