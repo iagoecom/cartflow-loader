@@ -852,12 +852,13 @@ discRow.innerHTML = `
         return;
       }
       const triggers=['[href="/cart"]','.cart-icon-bubble','[data-cart-toggle]','.header__icon--cart','[aria-label="Cart"]','[aria-label="Open cart"]','.cart-count-bubble','#cart-icon-bubble'];
-      if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
-        e.preventDefault(); e.stopPropagation();
-        const cart=await fetchShopifyCart();
-        if(window._cfConfig) renderCart(cart, window._cfConfig);
-        openCart();
-      }
+if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
+  e.preventDefault(); e.stopPropagation();
+  // Abrir imediatamente e buscar dados em seguida
+  openCart();
+  const cart=await fetchShopifyCart();
+  if(window._cfConfig) renderCart(cart, window._cfConfig);
+}
     }, true);
   }
 
@@ -871,10 +872,9 @@ discRow.innerHTML = `
     _lastSkus = initialSkus;
 
     // Carregar config e vitrine SKU map em paralelo
-    const [config] = await Promise.all([
-      getConfig(initialSkus),
-      getVitrineSkuMap()
-    ]);
+const config = await getConfig(initialSkus);
+// Carregar vitrine SKU map em background (não bloqueia)
+getVitrineSkuMap();
 
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
