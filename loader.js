@@ -271,9 +271,6 @@ let _lastCart = null;
         box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
         transition: background-color 0.15s ease, opacity 0.15s ease !important;
       }
-      #cf-overlay *, #cf-drawer * { box-sizing:border-box !important; }
-#cf-drawer *::before, #cf-drawer *::after,
-#cf-overlay *::before, #cf-overlay *::after { content:none !important; display:none !important; }
       @keyframes cf-spin { to { transform: rotate(360deg); } }
       @media (max-width:480px) { #cf-drawer { width:${mw};right:-${mw}; } }
     `;
@@ -631,7 +628,8 @@ ${(p.image_url || p.variants?.[0]?.image_url) ? `<div style="width:80px;height:8
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
                       ${variantHtml}
-<button id="cf-upsell-btn-${p.id}" onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>                    </div>
+                      <button onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>
+                    </div>
                   </div>
                 </div>`;
             }).join('')}
@@ -782,10 +780,8 @@ window.cfQty = async (key, qty) => {
 };
 
   // ── Add Upsell ──
-window.cfAddUpsell = async (productId) => {
-  if (!productId) return;
-  const btn = document.getElementById(`cf-upsell-btn-${productId}`);
-  if (btn) { btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; }
+  window.cfAddUpsell = async (productId) => {
+    if (!productId) return;
     const upsells = window._cfConfig?.upsells || [];
     const product = upsells.find(p => p.id === productId);
     if (!product) { console.warn('[CartFlow] Upsell not found:', productId); return; }
@@ -816,17 +812,13 @@ window.cfAddUpsell = async (productId) => {
       if (!res.ok) { console.warn('[CartFlow] Failed:', await res.text()); return; }
     } catch(e) { console.warn('[CartFlow] Add error:', e); return; }
 
-const cart = await fetchShopifyCart();
+    const cart = await fetchShopifyCart();
     if (window._cfConfig) {
       _lastSkus = '';
       await fetchUpsells(cart);
-      window._lastCart = cart;
       renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
-    // Restaurar botão após renderCart (busca novamente pois o DOM foi reconstruído)
-    const btnAfter = document.getElementById(`cf-upsell-btn-${productId}`);
-    if (btnAfter) { btnAfter.style.opacity = '0.85'; btnAfter.style.pointerEvents = 'auto'; }
   };
 
   window.closeCart = closeCart;
