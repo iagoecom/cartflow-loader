@@ -117,13 +117,7 @@ async function getConfig(skus) {
 async function getVitrineSkuMap() {
     if (_vitrineSkuMap && Object.keys(_vitrineSkuMap).length > 0) return _vitrineSkuMap;
     try {
-      // Tentar cache do sessionStorage
       const cached = sessionStorage.getItem('cf_sku_map');
-      if (cached) {
-        _vitrineSkuMap = JSON.parse(cached);
-        console.log('[CartFlow] SKU map from cache:', Object.keys(_vitrineSkuMap).length);
-        return _vitrineSkuMap;
-      }
       if (cached) {
         _vitrineSkuMap = JSON.parse(cached);
         console.log('[CartFlow] SKU map from cache:', Object.keys(_vitrineSkuMap).length);
@@ -149,7 +143,6 @@ async function getVitrineSkuMap() {
         if (data.products.length < 250) break;
         page++;
       }
-      // Salvar no cache após carregar tudo
       sessionStorage.setItem('cf_sku_map', JSON.stringify(_vitrineSkuMap));
       console.log('[CartFlow] Vitrine SKU map:', Object.keys(_vitrineSkuMap).length, 'variants');
     } catch(e) {
@@ -158,8 +151,7 @@ async function getVitrineSkuMap() {
     }
     return _vitrineSkuMap;
   }
-
-  async function fetchUpsells(cart) {
+    async function fetchUpsells(cart) {
     const skus = (cart.items || []).map(i => i.sku).filter(Boolean).join(',');
     if (!skus) { if (window._cfConfig) window._cfConfig.upsells = []; _lastSkus = ''; return; }
     if (skus === _lastSkus) return;
