@@ -200,7 +200,7 @@ async function getConfig(skus) {
     segments.push({ value: secs, label: labels[3]||'SEG' });
     container.innerHTML = segments.map((seg, i) => `
       <div style="display:flex;flex-direction:column;align-items:center">
-        <div style="display:flex;align-items:center;justify-content:center;border-radius:6px;font-weight:700;width:36px;height:36px;font-size:${fs(16)}px;background:${blockBg};color:${textColor}">${String(seg.value).padStart(2,'0')}</div>
+        <div style="display:flex;align-items:center;justify-content:center;border-radius:6px;font-weight:700;width:36px;height:36px;font-size:${_fs(16)}px;background:${blockBg};color:${textColor}">${String(seg.value).padStart(2,'0')}</div>
         <span style="font-size:9px;margin-top:2px;opacity:0.7;color:${annTextColor}">${seg.label}</span>
       </div>
       ${i < segments.length-1 ? `<span style="font-size:18px;font-weight:700;margin-top:-12px;color:${annTextColor}">:</span>` : ''}
@@ -305,8 +305,8 @@ async function getConfig(skus) {
         <div id="cf-footer">
           <div id="cf-badges-top"></div>
           <div class="cf-footer-inner" style="padding:12px 16px;">
-            <div id="cf-discounts-row" style="display:none;align-items:center;justify-content:space-between;font-size:${fs(12)}px;margin-bottom:8px;"></div>
-            <div id="cf-subtotal-row" style="display:flex;justify-content:space-between;font-size:${fs(15)}px;margin-bottom:8px;">
+            <div id="cf-discounts-row" style="display:none;align-items:center;justify-content:space-between;font-size:${_fs(15)}px;margin-bottom:8px;"></div>
+            <div id="cf-subtotal-row" style="display:flex;justify-content:space-between;font-size:${_fs(15)}px;margin-bottom:8px;">
               <span style="font-weight:500">Subtotal:</span>
               <span id="cf-subtotal" style="font-weight:700"></span>
             </div>
@@ -346,7 +346,7 @@ async function getConfig(skus) {
     const variants = product.variants || [];
     const meaningful = variants.filter(vr => vr.option_value && vr.option_value !== 'Default Title' && vr.option_value.trim() !== '');
     if (meaningful.length === 0) {
-      return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${variants[0]?.sku||''}" style="display:flex;gap:8px;flex:1;min-width:0"><select class="cf-upsell-select" style="font-size:${fs(11)}px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option>Default</option></select></span>`;
+      return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${variants[0]?.sku||''}" style="display:flex;gap:8px;flex:1;min-width:0"><select class="cf-upsell-select" style="font-size:${_fs(11)}px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option>Default</option></select></span>`;
     }
     const optionGroups = new Map();
     for (const vr of meaningful) {
@@ -366,7 +366,7 @@ async function getConfig(skus) {
       const values = [...valuesSet];
       const defaultVal = firstValues[idx]||values[0];
       const options = values.map(val => `<option value="${val}"${val===defaultVal?' selected':''}>${val}</option>`).join('');
-      selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:${fs(11)}px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0">${options}</select>`;
+      selectsHtml += `<select class="cf-upsell-select" data-cf-option="${name}" onchange="window.cfUpdateUpsellVariant(this)" style="font-size:${_fs(11)}px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0">${options}</select>`;
       idx++;
     }
     return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${defaultSku}" style="display:flex;gap:8px;flex:1;min-width:0">${selectsHtml}</span>`;
@@ -536,7 +536,7 @@ async function getConfig(skus) {
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
                   ${variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0;flex:1">${variantLabel}</p>` : '<div style="flex:1"></div>'}
-                  <span style="font-size:${fs(16)}px;font-weight:700;flex-shrink:0">${formatPriceDollars(displayPrice)}</span>
+                  <span style="font-size:${_fs(16)}px;font-weight:700;flex-shrink:0">${formatPriceDollars(displayPrice)}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
                   <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
@@ -544,7 +544,7 @@ async function getConfig(skus) {
                     <span style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
                     <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                   </div>
-                  ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<span style="font-size:${fs(11)}px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;flex-shrink:0;">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
+                  ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<span style="font-size:${_fs(11)}px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;flex-shrink:0;">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
                 </div>
               </div>
             </div>`;
@@ -630,7 +630,7 @@ async function getConfig(skus) {
       } else if (PRESET_IMAGES[badgePreset]) {
         badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${PRESET_IMAGES[badgePreset]}" alt="Trust Badge" style="width:${badgeSize}%;max-width:100%;object-fit:contain;display:block;margin:0 auto"/></div>`;
       } else if (PRESETS[badgePreset]) {
-        badgeHtml = `<div style="text-align:center;padding:8px 16px;font-size:${fs(11)}px;opacity:0.6">${SVG_ICONS.shield} ${PRESETS[badgePreset]}</div>`;
+        badgeHtml = `<div style="text-align:center;padding:8px 16px;font-size:${_fs(11)}px;opacity:0.6">${SVG_ICONS.shield} ${PRESETS[badgePreset]}</div>`;
       }
       if (badgeHtml) {
         const target = badgePos === 'above' ? badgesTop : badgesBot;
