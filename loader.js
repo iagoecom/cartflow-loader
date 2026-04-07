@@ -26,7 +26,6 @@
   let _upsellPending = false;
   let _addedUpsellSkus = new Set();
   let _refreshTimer = null;
-  let _lastCartToken = null;
   const SCALE_MAP = { small: 1, medium: 1.15, large: 1.3 };
   let _fontScale = 1.15;
   const fs = (base) => Math.round(base * _fontScale);
@@ -131,7 +130,7 @@
         for (const p of data.products) {
           for (const vr of p.variants) {
             if (vr.sku) {
-              _vitrineSkuMap[vr.sku] = {
+              _vitrineSkuMap[vr.sku.toUpperCase()] = {
                 id: vr.id,
                 price: parseFloat(vr.price || '0'),
                 compare_at_price: vr.compare_at_price ? parseFloat(vr.compare_at_price) : null
@@ -529,7 +528,7 @@
         items.forEach((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
-          const vitrineEntry = _vitrineSkuMap?.[item.sku];
+          const vitrineEntry = _vitrineSkuMap?.[item.sku?.toUpperCase()];
           const compareAtPriceDollars = vitrineEntry?.compare_at_price ? vitrineEntry.compare_at_price * item.quantity : null;
           const shopifyOrigCents = item.original_price || item.price;
           const shopifyOrigDollars = shopifyOrigCents * item.quantity / 100;
@@ -800,7 +799,7 @@
     if (!selectedSku || selectedSku === 'null') selectedSku = product.variants?.[0]?.sku || product.sku || '';
     if (!selectedSku) { _upsellPending = false; resetBtn(); return; }
     const vitrineMap = await getVitrineSkuMap();
-    const vitrineEntry = vitrineMap[selectedSku];
+    const vitrineEntry = vitrineMap[selectedSku.toUpperCase()];
     const vitrineVariantId = vitrineEntry?.id || vitrineEntry;
     if (!vitrineVariantId) { console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku); _upsellPending = false; resetBtn(); return; }
     // Track this SKU as an upsell addition
@@ -833,12 +832,6 @@
     _refreshTimer = setTimeout(async () => {
       try {
         let cart = await fetchShopifyCart();
-        // Retry if Shopify returned stale data (eventual consistency)
-        if (_lastCartToken && cart.token === _lastCartToken) {
-          await new Promise(r => setTimeout(r, 250));
-          cart = await fetchShopifyCart();
-        }
-        _lastCartToken = cart.token;
         window._lastCart = cart;
         if (_cartReady && window._cfConfig) {
           _lastSkus = '';
@@ -900,76 +893,11 @@
 
       const formData = new FormData(form);
 
-      // Convert FormData to a JSON payload that Shopify /cart/add.js understands.
-      // Bundle apps (Kaching, etc.) use array notation: items[0][id], items[0][quantity]
-      // Shopify's /cart/add.js expects JSON: { items: [{ id, quantity, ... }] }
-      let jsonBody = null;
       try {
-        const entries = [...formData.entries()];
-        const hasArrayItems = entries.some(([k]) => /^items\[/.test(k));
-
-        if (hasArrayItems) {
-          // Parse items[N][key] into proper array
-          const itemsMap = {};
-          const extras = {};
-          for (const [key, val] of entries) {
-            const m = key.match(/^items\[(\d+)\]\[(\w+)\]$/);
-            if (m) {
-              const idx = m[1];
-              if (!itemsMap[idx]) itemsMap[idx] = {};
-              itemsMap[idx][m[2]] = val;
-            } else {
-              extras[key] = val;
-            }
-          }
-          const items = Object.keys(itemsMap).sort((a,b) => a-b).map(idx => {
-            const item = itemsMap[idx];
-            if (item.id) item.id = Number(item.id);
-            if (item.quantity) item.quantity = Number(item.quantity);
-            return item;
-          });
-          if (items.length > 0) {
-            jsonBody = { items, ...extras };
-          }
-        } else {
-          // Simple form: id + quantity
-          const id = formData.get('id');
-          const quantity = formData.get('quantity') || 1;
-          if (id) {
-            const payload = { items: [{ id: Number(id), quantity: Number(quantity) }] };
-            // Preserve selling_plan, properties, etc.
-            const sp = formData.get('selling_plan');
-            if (sp) payload.items[0].selling_plan = sp;
-            for (const [k, v] of entries) {
-              if (k.startsWith('properties[')) {
-                const pk = k.match(/^properties\[(.+)\]$/)?.[1];
-                if (pk) {
-                  if (!payload.items[0].properties) payload.items[0].properties = {};
-                  payload.items[0].properties[pk] = v;
-                }
-              }
-            }
-            jsonBody = payload;
-          }
-        }
-      } catch(parseErr) {
-        console.warn('[CF] FormData parse fallback', parseErr);
-      }
-
-      try {
-        if (jsonBody) {
-          await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(jsonBody)
-          });
-        } else {
-          // Fallback: send FormData as-is
-          await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
-            method: 'POST',
-            body: formData
-          });
-        }
+        await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+          method: 'POST',
+          body: formData
+        });
         debouncedCartRefresh(true);
       } catch(err) { console.warn('[CF] form submit error', err); }
     }, { capture: true });
@@ -1029,23 +957,6 @@
     injectHTML(config.visual||{});
     interceptCart();
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
-    let _pollCount = initialCart.item_count || 0;
-setInterval(async () => {
-  if (document.getElementById('cf-drawer')?.classList.contains('open')) return;
-  try {
-    const cart = await fetchShopifyCart();
-    if (cart.item_count !== _pollCount) {
-      _pollCount = cart.item_count;
-      window._lastCart = cart;
-      if (window._cfConfig) {
-        _lastSkus = '';
-        await fetchUpsells(cart);
-        renderCart(cart, window._cfConfig);
-        openCart();
-      }
-    }
-  } catch(e) {}
-}, 1500);
     window._lastCart = initialCart;
     renderCart(initialCart, config);
     onCartReady();
