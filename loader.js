@@ -474,11 +474,12 @@ async function getConfig(skus) {
         let barHtml = '<div style="display:flex;align-items:center;gap:0">';
         let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
         sorted.forEach((tier, idx) => {
-          const segStart = idx===0 ? 0 : Number(sorted[idx-1].minimum_value)||0;
-          const segEnd = Number(tier.minimum_value)||0;
+          const segStart = idx===0 ? 0 : parseFloat(sorted[idx-1].minimum_value)||0;
+          const segEnd = parseFloat(tier.minimum_value)||0;
           const segRange = segEnd - segStart;
           const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
-          const reached = simValue >= (Number(tier.minimum_value)||0);
+          console.log('[CartFlow] Rewards segment', idx, {simValue, segStart, segEnd, segRange, lp});
+          const reached = simValue >= (parseFloat(tier.minimum_value)||0);
           const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
           const circleSize = reached ? 28 : 20;
           barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'}"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'};transition:width 0.4s;width:${lp}%"></div></div>`;
@@ -772,38 +773,39 @@ async function getConfig(skus) {
     if (!productId || _upsellPending) return;
     _upsellPending = true;
     const btn = document.getElementById(`cf-upsell-btn-${productId}`);
+    const origBtnText = btn ? btn.innerHTML : '';
     if (btn) { btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.innerHTML = SVG_ICONS.spin + ' Adding...'; }
+    const resetBtn = () => { const b = document.getElementById(\`cf-upsell-btn-\${productId}\`); if(b){b.style.opacity='0.85';b.style.pointerEvents='auto';b.innerHTML=origBtnText||(v.upsells_button_text||'+Add');} };
     const upsells = window._cfConfig?.upsells || [];
     const product = upsells.find(p => p.id === productId);
-    if (!product) { _upsellPending = false; return; }
+    if (!product) { _upsellPending = false; resetBtn(); return; }
     const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
     const wrapper = card?.querySelector('[data-cf-selected-sku]');
     let selectedSku = wrapper?.getAttribute('data-cf-selected-sku') || '';
     if (!selectedSku || selectedSku === 'null') selectedSku = product.variants?.[0]?.sku || product.sku || '';
-    if (!selectedSku) { _upsellPending = false; return; }
+    if (!selectedSku) { _upsellPending = false; resetBtn(); return; }
     const vitrineMap = await getVitrineSkuMap();
     const vitrineEntry = vitrineMap[selectedSku];
     const vitrineVariantId = vitrineEntry?.id || vitrineEntry;
-    if (!vitrineVariantId) { console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku); _upsellPending = false; return; }
+    if (!vitrineVariantId) { console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku); _upsellPending = false; resetBtn(); return; }
     try {
       const res = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: [{ id: vitrineVariantId, quantity: 1 }] })
       });
-      if (!res.ok) { console.warn('[CartFlow] Failed:', await res.text()); _upsellPending = false; return; }
-    } catch(e) { console.warn('[CartFlow] Add error:', e); _upsellPending = false; return; }
+      if (!res.ok) { console.warn('[CartFlow] Failed:', await res.text()); _upsellPending = false; resetBtn(); return; }
+    } catch(e) { console.warn('[CartFlow] Add error:', e); _upsellPending = false; resetBtn(); return; }
     const cart = await fetchShopifyCart();
     window._lastCart = cart; // FIX: garantir que _lastCart está atualizado antes do checkout
 if (window._cfConfig) {
       _lastSkus = '';
-      fetchUpsells(cart);
+      await fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
     _upsellPending = false;
-    const btnAfter = document.getElementById(`cf-upsell-btn-${productId}`);
-    if (btnAfter) { btnAfter.style.opacity = '0.85'; btnAfter.style.pointerEvents = 'auto'; }
+    resetBtn();
   };
 
   window.closeCart = closeCart;
