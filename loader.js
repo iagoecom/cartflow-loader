@@ -14,7 +14,7 @@
   let _lastSkus = '';
   let _vitrineSkuMap = null;
   let _lastCart = null;
-let _upsellQueue = Promise.resolve(); // Fila inteligente para evitar gargalo no Shopify
+  let _upsellPending = false; // FIX: evitar checkout enquanto upsell adiciona
   const SCALE_MAP = { small: 1, medium: 1.15, large: 1.3 };
   let _fontScale = 1.15;
   const fs = (base) => Math.round(base * _fontScale);
@@ -442,8 +442,8 @@ async function getConfig(skus) {
         const isQty = (v.rewards_calculation||'cart_total') === 'quantity';
         const totalQty = count;
         const totalValue = cart.total_price / 100;
-        const simValue = isQty ? totalQty : totalValue;
-        const sorted = [...tiers].sort((a,b) => a.minimum_value - b.minimum_value);
+        const simValue = Number(isQty ? totalQty : totalValue)||0;
+        const sorted = [...tiers].sort((a,b) => (Number(a.minimum_value)||0) - (Number(b.minimum_value)||0));
         const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
         const rawSubtotal = rawSubtotalCents / 100;
         const cheapestPrice = items.length > 0 ? Math.min(...items.map(i => i.price)) / 100 : 0;
@@ -474,11 +474,11 @@ async function getConfig(skus) {
         let barHtml = '<div style="display:flex;align-items:center;gap:0">';
         let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
         sorted.forEach((tier, idx) => {
-          const segStart = idx===0 ? 0 : sorted[idx-1].minimum_value;
-          const segEnd = tier.minimum_value;
+          const segStart = idx===0 ? 0 : Number(sorted[idx-1].minimum_value)||0;
+          const segEnd = Number(tier.minimum_value)||0;
           const segRange = segEnd - segStart;
           const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
-          const reached = simValue >= tier.minimum_value;
+          const reached = simValue >= (Number(tier.minimum_value)||0);
           const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
           const circleSize = reached ? 28 : 20;
           barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'}"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'};transition:width 0.4s;width:${lp}%"></div></div>`;
@@ -489,7 +489,7 @@ async function getConfig(skus) {
           labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
         });
         barHtml += '</div>'; labelsHtml += '</div>';
-        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${fs(v.rewards_font_size||14)}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
+        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:visible;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${fs(v.rewards_font_size||14)}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
       }
     }
 
@@ -526,31 +526,28 @@ async function getConfig(skus) {
           }
           const borderBottom = idx < items.length-1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
           return `
-            <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
-              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;">
+            <div style="display:flex;align-items:start;gap:12px;padding:16px;${borderBottom}">
+              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:start;justify-content:center;">
                 <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" />
               </div>
-              
-              <div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between;">
-                <div>
-                  <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;">${productTitle}</p>
-                  ${variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:4px 0 0 0;">${variantLabel}</p>` : ''}
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                  <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
+                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
                 </div>
-                <div style="margin-top:12px">
-                  <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;background:#fff">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+                  ${variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0;flex:1">${variantLabel}</p>` : '<div style="flex:1"></div>'}
+                  ${v.show_strikethrough && hasDis ? `<span style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;flex-shrink:0">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+                  <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
                     <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
                     <span style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
                     <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                   </div>
+                  <span style="font-size:${fs(16)}px;font-weight:700;flex-shrink:0">${formatPriceDollars(displayPrice)}</span>
                 </div>
-              </div>
-
-              <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;text-align:right;">
-                <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;margin-bottom:auto;" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
-                
-                ${v.show_strikethrough && hasDis ? `<span style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;margin-top:8px">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
-                <span style="font-size:${fs(16)}px;font-weight:700;margin-top:2px">${formatPriceDollars(displayPrice)}</span>
-                ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<span style="font-size:${fs(11)}px;font-weight:600;color:${v.savings_color||'#22c55e'};margin-top:4px;">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
+                ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<div style="display:flex;justify-content:flex-end;margin-top:4px"><span style="font-size:${fs(11)}px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;flex-shrink:0;">Save ${formatPriceDollars(totalSavingsItem)}</span></div>` : ''}
               </div>
             </div>`;
         }).join('');
@@ -702,7 +699,7 @@ async function getConfig(skus) {
     const tiers = config.rewards || [];
     const isQty = (v.rewards_calculation||'cart_total') === 'quantity';
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
-    const unlockedTiers = tiers.filter(t => simValue >= t.minimum_value);
+    const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
     if (bestCoupon?.shopify_coupon) checkoutUrl += `?discount=${encodeURIComponent(bestCoupon.shopify_coupon)}`;
     return checkoutUrl;
@@ -723,76 +720,68 @@ async function getConfig(skus) {
   };
 
   // FIX 3: cfAddUpsell — atualiza _lastCart antes de permitir checkout
-window.cfAddUpsell = (productId) => {
-    if (!productId) return;
-
+  window.cfAddUpsell = async (productId) => {
+    if (!productId || _upsellPending) return;
+    _upsellPending = true;
     const btn = document.getElementById(`cf-upsell-btn-${productId}`);
-    // Se ESTE botão específico já está carregando, ignora duplo-clique acidental nele mesmo
-    if (btn && btn.getAttribute('data-loading') === 'true') return;
-
-    // 1. Feedback visual imediato para o cliente
-    if (btn) {
-      if (!btn.getAttribute('data-orig-text')) {
-         btn.setAttribute('data-orig-text', btn.innerHTML); // Salva o texto original
-      }
-      btn.setAttribute('data-loading', 'true');
-      btn.style.opacity = '0.5';
-      btn.style.pointerEvents = 'none';
-      btn.innerHTML = SVG_ICONS.spin + ' Adding...';
+    if (btn) { btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.innerHTML = SVG_ICONS.spin + ' Adding...'; }
+    const upsells = window._cfConfig?.upsells || [];
+    const product = upsells.find(p => p.id === productId);
+    if (!product) { _upsellPending = false; return; }
+    const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
+    const wrapper = card?.querySelector('[data-cf-selected-sku]');
+    let selectedSku = wrapper?.getAttribute('data-cf-selected-sku') || '';
+    if (!selectedSku || selectedSku === 'null') selectedSku = product.variants?.[0]?.sku || product.sku || '';
+    if (!selectedSku) { _upsellPending = false; return; }
+    const vitrineMap = await getVitrineSkuMap();
+    const vitrineEntry = vitrineMap[selectedSku];
+    const vitrineVariantId = vitrineEntry?.id || vitrineEntry;
+    if (!vitrineVariantId) { console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku); _upsellPending = false; return; }
+    try {
+      const res = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id: vitrineVariantId, quantity: 1 }] })
+      });
+      if (!res.ok) { console.warn('[CartFlow] Failed:', await res.text()); _upsellPending = false; return; }
+    } catch(e) { console.warn('[CartFlow] Add error:', e); _upsellPending = false; return; }
+    const cart = await fetchShopifyCart();
+    window._lastCart = cart; // FIX: garantir que _lastCart está atualizado antes do checkout
+if (window._cfConfig) {
+      _lastSkus = '';
+      fetchUpsells(cart);
+      renderCart(cart, window._cfConfig);
+      trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
-
-    // Função interna para resetar o botão caso algo dê errado
-    const restoreBtn = () => {
-      const b = document.getElementById(`cf-upsell-btn-${productId}`);
-      if (b) {
-        b.removeAttribute('data-loading');
-        b.style.opacity = '0.85';
-        b.style.pointerEvents = 'auto';
-        b.innerHTML = b.getAttribute('data-orig-text') || (window._cfConfig?.visual?.upsells_button_text || '+Add');
-      }
-    };
-
-    // 2. Coloca a requisição na Fila (Queue) para o Shopify não perder itens paralelos
-    _upsellQueue = _upsellQueue.then(async () => {
-      const upsells = window._cfConfig?.upsells || [];
-      const product = upsells.find(p => p.id === productId);
-      if (!product) { restoreBtn(); return; }
-
-      const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
-      const wrapper = card?.querySelector('[data-cf-selected-sku]');
-      let selectedSku = wrapper?.getAttribute('data-cf-selected-sku') || '';
-      if (!selectedSku || selectedSku === 'null') selectedSku = product.variants?.[0]?.sku || product.sku || '';
-      if (!selectedSku) { restoreBtn(); return; }
-
-      const vitrineMap = await getVitrineSkuMap();
-      const vitrineEntry = vitrineMap[selectedSku];
-      const vitrineVariantId = vitrineEntry?.id || vitrineEntry;
-      if (!vitrineVariantId) { console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku); restoreBtn(); return; }
-
-      try {
-        const res = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: [{ id: vitrineVariantId, quantity: 1 }] })
-        });
-        if (!res.ok) { restoreBtn(); return; }
-      } catch(e) { restoreBtn(); return; }
-
-      // 3. Sucesso! Puxa o carrinho fresco e atualiza a interface
-      const cart = await fetchShopifyCart();
-      window._lastCart = cart; 
-      
-      if (window._cfConfig) {
-        _lastSkus = '';
-        fetchUpsells(cart);
-        renderCart(cart, window._cfConfig); // renderCart recria a lista, o que já remove o "Adding..." automaticamente
-        trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
-      }
-    }).catch(err => {
-       console.error('[CartFlow] Falha na fila de upsell:', err);
-       restoreBtn(); // Garante que o botão nunca trave, mesmo se der erro bizarro
-    });
+    _upsellPending = false;
+    const btnAfter = document.getElementById(`cf-upsell-btn-${productId}`);
+    if (btnAfter) { btnAfter.style.opacity = '0.85'; btnAfter.style.pointerEvents = 'auto'; }
   };
+
+  window.closeCart = closeCart;
+
+  function interceptCart() {
+    if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const url = String(args[0]||'');
+      const result = await window._cfOrigFetch.apply(window, args);
+      if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
+        try {
+          const clone = await result.clone().json();
+          if (clone?.id || clone?.items || clone?.item_count !== undefined) {
+            const cart = await fetchShopifyCart();
+            window._lastCart = cart;
+            if (_cartReady && window._cfConfig) {
+              _lastSkus = '';
+              await fetchUpsells(cart);
+              renderCart(cart, window._cfConfig);
+              if (url.includes('/cart/add')) openCart();
+            } else if (url.includes('/cart/add')) { _pendingOpen = true; }
+          }
+        } catch(e){}
+      }
+      return result;
+    };
 
     // FIX 1: Interceptar XMLHttpRequest (PageFly usa XHR)
     const origXHROpen = XMLHttpRequest.prototype.open;
@@ -847,10 +836,9 @@ window.cfAddUpsell = (productId) => {
       }
     }, { capture: true });
 
-   document.addEventListener('click', async (e) => {
+    document.addEventListener('click', async (e) => {
       const t = e.target;
       if (t.id==='cf-close'||t.closest('#cf-close')||t.id==='cf-overlay') { closeCart(); return; }
-      
       if (t.id==='cf-checkout'||t.closest('#cf-checkout')) {
         e.preventDefault();
         const btn = document.getElementById('cf-checkout');
@@ -858,12 +846,9 @@ window.cfAddUpsell = (productId) => {
         btn.disabled = true;
         const origHtml = btn.innerHTML;
         btn.innerHTML = `${SVG_ICONS.spin} SECURE CHECKOUT`;
-        
         try {
-          // Espera silenciosamente a fila de upsells terminar (caso o cliente tenha clicado no checkout rápido demais)
-          await _upsellQueue; 
-          
-          const cart = window._lastCart || await fetchShopifyCart();
+          // FIX 4: Se upsell ainda está sendo adicionado, busca carrinho fresh
+          const cart = _upsellPending ? await fetchShopifyCart() : (window._lastCart || await fetchShopifyCart());
           window._lastCart = cart;
           const url = await buildCheckoutUrl(cart.items, window._cfConfig);
           trackEvent('checkout', cart.total_price/100);
@@ -872,7 +857,6 @@ window.cfAddUpsell = (productId) => {
         finally { setTimeout(() => { btn.disabled=false; btn.innerHTML=origHtml; }, 3000); }
         return;
       }
-
       // FIX 3: Triggers expandidos para todos os temas
       const triggers = [
         '[href="/cart"]', '.cart-icon-bubble', '[data-cart-toggle]',
