@@ -25,6 +25,8 @@
   let _lastCart = null;
   let _upsellPending = false;
   let _addedUpsellSkus = new Set();
+  let _refreshTimer = null;
+  let _lastCartToken = null;
   const SCALE_MAP = { small: 1, medium: 1.15, large: 1.3 };
   let _fontScale = 1.15;
   const fs = (base) => Math.round(base * _fontScale);
@@ -819,7 +821,34 @@
 
   window.closeCart = closeCart;
 
+  // Debounced cart refresh — groups rapid add/change calls (bundles, etc.)
+  function debouncedCartRefresh(openAfter) {
+    clearTimeout(_refreshTimer);
+    _refreshTimer = setTimeout(async () => {
+      try {
+        let cart = await fetchShopifyCart();
+        // Retry if Shopify returned stale data (eventual consistency)
+        if (_lastCartToken && cart.token === _lastCartToken) {
+          await new Promise(r => setTimeout(r, 250));
+          cart = await fetchShopifyCart();
+        }
+        _lastCartToken = cart.token;
+        window._lastCart = cart;
+        if (_cartReady && window._cfConfig) {
+          _lastSkus = '';
+          await fetchUpsells(cart);
+          renderCart(cart, window._cfConfig);
+          if (openAfter) openCart();
+        } else if (openAfter) { _pendingOpen = true; }
+      } catch(e) {}
+    }, 300);
+  }
+
   function interceptCart() {
+    // Guard: prevent double-patching if script loads twice
+    if (window._cfFetchPatched) return;
+    window._cfFetchPatched = true;
+
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
@@ -828,14 +857,7 @@
         try {
           const clone = await result.clone().json();
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
-            const cart = await fetchShopifyCart();
-            window._lastCart = cart;
-            if (_cartReady && window._cfConfig) {
-              _lastSkus = '';
-              await fetchUpsells(cart);
-              renderCart(cart, window._cfConfig);
-              if (url.includes('/cart/add')) openCart();
-            } else if (url.includes('/cart/add')) { _pendingOpen = true; }
+            debouncedCartRefresh(url.includes('/cart/add'));
           }
         } catch(e){}
       }
@@ -851,17 +873,11 @@
     XMLHttpRequest.prototype.send = function(body) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
-        this.addEventListener('load', async () => {
-          try {
-            const cart = await fetchShopifyCart();
-            window._lastCart = cart;
-            if (_cartReady && window._cfConfig) {
-              _lastSkus = '';
-              await fetchUpsells(cart);
-              renderCart(cart, window._cfConfig);
-              if (url.includes('/cart/add')) openCart();
-            } else if (url.includes('/cart/add')) { _pendingOpen = true; }
-          } catch(e) {}
+        this.addEventListener('load', () => {
+          // Small delay to let Shopify persist the change before we read /cart.js
+          setTimeout(() => {
+            debouncedCartRefresh(url.includes('/cart/add'));
+          }, 50);
         });
       }
       return origXHRSend.apply(this, arguments);
@@ -871,7 +887,7 @@
       const form = e.target;
       if (form.tagName === 'FORM' && (form.action || '').includes('/cart/add')) {
         e.preventDefault();
-        e.stopPropagation();
+        // No stopPropagation — let other apps (tracking, bundles) process the event
         const formData = new FormData(form);
         const body = {};
         formData.forEach((val, key) => { body[key] = val; });
@@ -881,14 +897,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ items: [{ id: Number(body.id), quantity: Number(body.quantity || 1) }] })
           });
-          const cart = await fetchShopifyCart();
-          window._lastCart = cart;
-          if (_cartReady && window._cfConfig) {
-            _lastSkus = '';
-            await fetchUpsells(cart);
-            renderCart(cart, window._cfConfig);
-            openCart();
-          } else { _pendingOpen = true; }
+          debouncedCartRefresh(true);
         } catch(e) {}
       }
     }, { capture: true });
