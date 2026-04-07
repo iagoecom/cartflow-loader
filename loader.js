@@ -511,6 +511,8 @@
       if (items.length === 0) {
         itemsEl.innerHTML = '<div class="cf-empty"><div class="cf-empty-icon">🛒</div><p>Your cart is empty</p></div>';
       } else {
+        const emptyEl = itemsEl.querySelector('.cf-empty');
+        if (emptyEl) emptyEl.remove();
         const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
         const rawSubtotalDollars = rawSubtotalCents / 100;
         const newKeys = new Set(items.map(i => String(i.key)));
@@ -570,19 +572,19 @@
                   <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
                   <span data-cf-del role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-                  ${variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0;flex:1">${variantLabel}</p>` : '<div style="flex:1"></div>'}
-                  <span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;flex-shrink:0;${v.show_strikethrough && hasDis ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
+                ${variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0 0 2px 0">${variantLabel}</p>` : ''}
+                <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
+                  <span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;${v.show_strikethrough && hasDis ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
+                  <span data-cf-price style="font-size:${fs(15)}px;font-weight:700">${formatPriceDollars(displayPrice)}</span>
+                  <span data-cf-save style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};${v.show_strikethrough && totalSavingsItem > 0.01 ? '' : 'display:none'}">(Save ${formatPriceDollars(totalSavingsItem)})</span>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+                <div style="margin-top:8px">
                   <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
                     <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
                     <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
                     <span data-cf-plus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                   </div>
-                  <span data-cf-price style="font-size:${fs(16)}px;font-weight:700;flex-shrink:0">${formatPriceDollars(displayPrice)}</span>
                 </div>
-                <div style="display:flex;justify-content:flex-end;margin-top:4px"><span data-cf-save style="font-size:${fs(11)}px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;flex-shrink:0;${v.show_strikethrough && totalSavingsItem > 0.01 ? '' : 'display:none'}">Save ${formatPriceDollars(totalSavingsItem)}</span></div>
               </div>
             </div>`;
             const newNode = div.firstElementChild;
