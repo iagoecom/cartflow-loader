@@ -898,37 +898,15 @@
       // Prevent page redirect (native /cart/add returns HTML redirect)
       e.preventDefault();
 
-      // Collect ALL FormData fields — preserves bundle items[], quantities, properties, etc.
+      // Send original FormData as-is — preserves ALL fields from bundle apps
+      // (items[][id], items[][quantity], selling_plan, properties, etc.)
       const formData = new FormData(form);
-
-      // Check if FormData contains items[] array (bundle apps)
-      const itemIds = formData.getAll('items[][id]');
-      const itemQtys = formData.getAll('items[][quantity]');
-
-      let payload;
-      if (itemIds.length > 0) {
-        // Bundle format: items[][id], items[][quantity], etc.
-        payload = { items: itemIds.map((id, i) => ({
-          id: Number(id),
-          quantity: Number(itemQtys[i] || 1)
-        })) };
-      } else {
-        // Standard single-product form: id + quantity
-        const id = formData.get('id');
-        const quantity = formData.get('quantity') || 1;
-        // Collect product properties (e.g. properties[Gift Message])
-        const properties = {};
-        formData.forEach((val, key) => {
-          if (key.startsWith('properties[')) properties[key.replace('properties[','').replace(']','')] = val;
-        });
-        payload = { items: [{ id: Number(id), quantity: Number(quantity), ...(Object.keys(properties).length ? { properties } : {}) }] };
-      }
 
       try {
         await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: formData
+          // No Content-Type header — browser sets multipart/form-data automatically
         });
         debouncedCartRefresh(true);
       } catch(err) { console.warn('[CF] form submit error', err); }
