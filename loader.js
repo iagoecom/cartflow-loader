@@ -115,10 +115,15 @@ async function getConfig(skus) {
 
   // FIX PERF: Vitrine SKU map carrega em background e cacheia imagens
 async function getVitrineSkuMap() {
-    if (_vitrineSkuMap) return _vitrineSkuMap;
+    if (_vitrineSkuMap && Object.keys(_vitrineSkuMap).length > 0) return _vitrineSkuMap;
     try {
       // Tentar cache do sessionStorage
       const cached = sessionStorage.getItem('cf_sku_map');
+      if (cached) {
+        _vitrineSkuMap = JSON.parse(cached);
+        console.log('[CartFlow] SKU map from cache:', Object.keys(_vitrineSkuMap).length);
+        return _vitrineSkuMap;
+      }
       if (cached) {
         _vitrineSkuMap = JSON.parse(cached);
         console.log('[CartFlow] SKU map from cache:', Object.keys(_vitrineSkuMap).length);
@@ -901,7 +906,9 @@ async function getVitrineSkuMap() {
     _lastSkus = initialSkus;
     const config = await getConfig(initialSkus);
     // FIX PERF: Carregar vitrine SKU map em background sem bloquear
-    getVitrineSkuMap();
+    getVitrineSkuMap().then(map => {
+  console.log('[CartFlow] SKU map ready:', Object.keys(map).length);
+});
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
     injectStyles(config.visual||{});
