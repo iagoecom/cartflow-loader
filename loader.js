@@ -493,6 +493,13 @@ async function getConfig(skus) {
       }
     }
 
+    // Pre-cache all images to prevent flicker on re-render
+    if (!window._cfImgCache) window._cfImgCache = {};
+    const allImgUrls = items.map(i => i.image || i.featured_image?.url || '')
+      .concat((config.upsells || []).map(u => u.image_url || ''))
+      .filter(Boolean);
+    allImgUrls.forEach(url => { if (!window._cfImgCache[url]) { const img = new Image(); img.src = url; window._cfImgCache[url] = img; } });
+
     const itemsEl = document.getElementById('cf-items');
     if (itemsEl) {
       if (items.length === 0) {
@@ -500,7 +507,11 @@ async function getConfig(skus) {
       } else {
         const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
         const rawSubtotalDollars = rawSubtotalCents / 100;
-        itemsEl.innerHTML = items.map((item, idx) => {
+        // DOM patching: update existing items instead of replacing innerHTML
+        const newKeys = new Set(items.map(i => String(i.key)));
+        const existingNodes = itemsEl.querySelectorAll('[data-cf-item-key]');
+        existingNodes.forEach(n => { if (!newKeys.has(n.dataset.cfItemKey)) n.remove(); });
+        items.forEach((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
           const vitrineEntry = _vitrineSkuMap?.[item.sku];
@@ -525,41 +536,75 @@ async function getConfig(skus) {
             variantLabel = item.variant_title;
           }
           const borderBottom = idx < items.length-1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
-          return `
-            <div style="display:flex;align-items:start;gap:12px;padding:16px;${borderBottom}">
+          const existing = itemsEl.querySelector(`[data-cf-item-key="${item.key}"]`);
+          if (existing) {
+            // Patch existing node — update text/prices without touching images
+            const qtyEl = existing.querySelector('[data-cf-qty]');
+            if (qtyEl) qtyEl.textContent = item.quantity;
+            const priceEl = existing.querySelector('[data-cf-price]');
+            if (priceEl) priceEl.textContent = formatPriceDollars(displayPrice);
+            const strikeEl = existing.querySelector('[data-cf-strike]');
+            if (strikeEl) { if (v.show_strikethrough && hasDis) { strikeEl.textContent = formatPriceDollars(lineCompareDollars); strikeEl.style.display = ''; } else { strikeEl.style.display = 'none'; } }
+            const saveEl = existing.querySelector('[data-cf-save]');
+            if (saveEl) { if (v.show_strikethrough && totalSavingsItem > 0.01) { saveEl.textContent = `Save ${formatPriceDollars(totalSavingsItem)}`; saveEl.style.display = ''; } else { saveEl.style.display = 'none'; } }
+            // Update qty buttons onclick
+            const minusBtn = existing.querySelector('[data-cf-minus]');
+            if (minusBtn) minusBtn.setAttribute('onclick', `cfQty('${item.key}',${item.quantity-1})`);
+            const plusBtn = existing.querySelector('[data-cf-plus]');
+            if (plusBtn) plusBtn.setAttribute('onclick', `cfQty('${item.key}',${item.quantity+1})`);
+            const delBtn = existing.querySelector('[data-cf-del]');
+            if (delBtn) delBtn.setAttribute('onclick', `cfQty('${item.key}',0)`);
+            // Update border
+            existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
+          } else {
+            // Insert new item
+            const div = document.createElement('div');
+            div.innerHTML = `
+            <div data-cf-item-key="${item.key}" style="display:flex;align-items:center;gap:12px;padding:16px;${borderBottom}">
               <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
                 <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" />
               </div>
               <div style="flex:1;min-width:0">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start">
                   <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
-                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
+                  <span data-cf-del role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
                   ${variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0;flex:1">${variantLabel}</p>` : '<div style="flex:1"></div>'}
-                  ${v.show_strikethrough && hasDis ? `<span style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;flex-shrink:0">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
+                  <span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;flex-shrink:0;${v.show_strikethrough && hasDis ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
                   <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
-                    <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
-                    <span style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
-                    <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
+                    <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
+                    <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
+                    <span data-cf-plus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                   </div>
-                  <span style="font-size:${fs(16)}px;font-weight:700;flex-shrink:0">${formatPriceDollars(displayPrice)}</span>
+                  <span data-cf-price style="font-size:${fs(16)}px;font-weight:700;flex-shrink:0">${formatPriceDollars(displayPrice)}</span>
                 </div>
-                ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<div style="display:flex;justify-content:flex-end;margin-top:4px"><span style="font-size:${fs(11)}px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;flex-shrink:0;">Save ${formatPriceDollars(totalSavingsItem)}</span></div>` : ''}
+                <div style="display:flex;justify-content:flex-end;margin-top:4px"><span data-cf-save style="font-size:${fs(11)}px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;flex-shrink:0;${v.show_strikethrough && totalSavingsItem > 0.01 ? '' : 'display:none'}">Save ${formatPriceDollars(totalSavingsItem)}</span></div>
               </div>
             </div>`;
-        }).join('');
+            const newNode = div.firstElementChild;
+            if (itemsEl.children[idx]) itemsEl.insertBefore(newNode, itemsEl.children[idx]);
+            else itemsEl.appendChild(newNode);
+          }
+        });
       }
     }
 
     const upsells = config.upsells || [];
     const topEl = document.getElementById('cf-upsells-top');
     const btmEl = document.getElementById('cf-upsells-bottom');
-    if (topEl) topEl.innerHTML = '';
-    if (btmEl) btmEl.innerHTML = '';
-    if (v.upsells_enabled && upsells.length > 0) {
+    // Skip upsell re-render if same products (prevents image flicker)
+    const upsellIds = upsells.map(u => u.id).sort().join(',');
+    const prevUpsellIds = window._cfPrevUpsellIds || '';
+    const upsellsChanged = upsellIds !== prevUpsellIds;
+    window._cfPrevUpsellIds = upsellIds;
+    if (upsellsChanged) {
+      if (topEl) topEl.innerHTML = '';
+      if (btmEl) btmEl.innerHTML = '';
+    }
+    if (v.upsells_enabled && upsells.length > 0 && upsellsChanged) {
       const upsellBg = accentColor;
       const upsellText = accentTextColor;
       const isStack = (v.upsells_direction||'stack') !== 'inline';
@@ -594,7 +639,10 @@ async function getConfig(skus) {
     }
 
     const addonEl = document.getElementById('cf-addon-section');
-    if (addonEl) {
+    const addonStateKey = `${_spActive}-${_gwActive}`;
+    const addonChanged = addonStateKey !== window._cfPrevAddonState;
+    window._cfPrevAddonState = addonStateKey;
+    if (addonEl && addonChanged) {
       addonEl.innerHTML = '';
       let addonHtml = '';
       if (v.shipping_protection_enabled) {
@@ -611,7 +659,7 @@ async function getConfig(skus) {
         addonHtml += `<div style="padding:8px 16px 0 16px"><div id="cf-addon-gw" onclick="window.cfToggleAddon('gw')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_gwActive?'#059669':'rgba(0,0,0,0.10)'};background:${_gwActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_gwActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_gwActive?SVG_ICONS.check:''}</div>${v.gw_icon?`<img src="${v.gw_icon}" alt="GW" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:${fs(12)}px;font-weight:600;margin:0">${gwTitle}</p><p style="font-size:${fs(12)}px;opacity:0.6;margin:0">${gwDesc}</p></div></div><span style="font-size:${fs(14)}px;font-weight:600;flex-shrink:0;margin-left:8px">${formatPriceDollars(gwPrice)}</span></div></div></div>`;
       }
       if (addonHtml) addonEl.innerHTML = addonHtml;
-    }
+    } else if (addonEl && !addonChanged) { /* skip re-render */ }
 
     const badgesTop = document.getElementById('cf-badges-top');
     const badgesBot = document.getElementById('cf-badges-bottom');
