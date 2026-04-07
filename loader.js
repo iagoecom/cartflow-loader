@@ -349,7 +349,7 @@ async function getConfig(skus) {
     const variants = product.variants || [];
     const meaningful = variants.filter(vr => vr.option_value && vr.option_value !== 'Default Title' && vr.option_value.trim() !== '');
     if (meaningful.length === 0) {
-      return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${variants[0]?.sku||''}" style="display:flex;gap:8px;flex:1;min-width:0"><select class="cf-upsell-select" style="font-size:11px;height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(0,0,0,0.25);background:${v.bg_color||'#fff'};color:${v.text_color||'#000'};flex:1;min-width:0"><option>Default</option></select></span>`;
+      return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${variants[0]?.sku||''}" style="display:flex;gap:8px;flex:1;min-width:0"></span>`;
     }
     const optionGroups = new Map();
     for (const vr of meaningful) {
@@ -527,7 +527,7 @@ async function getConfig(skus) {
           const borderBottom = idx < items.length-1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
           return `
             <div style="display:flex;align-items:start;gap:12px;padding:16px;${borderBottom}">
-              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:start;justify-content:center;">
+              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
                 <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" />
               </div>
               <div style="flex:1;min-width:0">
