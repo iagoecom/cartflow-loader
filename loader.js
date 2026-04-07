@@ -775,7 +775,7 @@ async function getConfig(skus) {
     const btn = document.getElementById(`cf-upsell-btn-${productId}`);
     const origBtnText = btn ? btn.innerHTML : '';
     if (btn) { btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.innerHTML = SVG_ICONS.spin + ' Adding...'; }
-    const resetBtn = () => { const b = document.getElementById(\`cf-upsell-btn-\${productId}\`); if(b){b.style.opacity='0.85';b.style.pointerEvents='auto';b.innerHTML=origBtnText||(v.upsells_button_text||'+Add');} };
+    const resetBtn = () => { const b = document.getElementById(`cf-upsell-btn-${productId}`); if(b){b.style.opacity='0.85';b.style.pointerEvents='auto';b.innerHTML=origBtnText||(window._cfConfig?.visual?.upsells_button_text||'+Add');} };
     const upsells = window._cfConfig?.upsells || [];
     const product = upsells.find(p => p.id === productId);
     if (!product) { _upsellPending = false; resetBtn(); return; }
