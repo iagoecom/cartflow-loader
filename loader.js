@@ -478,10 +478,15 @@
         } else {
           rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
         }
-        let barHtml = '<div style="display:flex;align-items:center;gap:0">';
-        let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
-        sorted.forEach((tier, idx) => {
-          const segStart = idx===0 ? 0 : parseFloat(sorted[idx-1].minimum_value)||0;
+let barHtml = '<div style="display:flex;align-items:center;gap:0">';
+let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:4px">';
+
+// Ponto de origem fixo
+barHtml += `<div style="flex-shrink:0;width:10px;height:10px;border-radius:50%;background:${v.rewards_bar_fg_color||'#303030'};margin:0 2px"></div>`;
+labelsHtml += '<div style="flex-shrink:0;width:14px"></div>';
+
+sorted.forEach((tier, idx) => {
+  const segStart = idx===0 ? 0 : parseFloat(sorted[idx-1].minimum_value)||0;
           const segEnd = parseFloat(tier.minimum_value)||0;
           const segRange = segEnd - segStart;
           const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
