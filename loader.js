@@ -26,6 +26,7 @@
   let _upsellPending = false;
   let _addedUpsellSkus = new Set();
   let _refreshTimer = null;
+  let _lastCartToken = null;
   const SCALE_MAP = { small: 1, medium: 1.15, large: 1.3 };
   let _fontScale = 1.15;
   const fs = (base) => Math.round(base * _fontScale);
@@ -130,7 +131,7 @@
         for (const p of data.products) {
           for (const vr of p.variants) {
             if (vr.sku) {
-              _vitrineSkuMap[vr.sku.toUpperCase()] = {
+              _vitrineSkuMap[vr.sku] = {
                 id: vr.id,
                 price: parseFloat(vr.price || '0'),
                 compare_at_price: vr.compare_at_price ? parseFloat(vr.compare_at_price) : null
@@ -528,7 +529,7 @@
         items.forEach((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
-          const vitrineEntry = _vitrineSkuMap?.[item.sku?.toUpperCase()];
+          const vitrineEntry = _vitrineSkuMap?.[item.sku];
           const compareAtPriceDollars = vitrineEntry?.compare_at_price ? vitrineEntry.compare_at_price * item.quantity : null;
           const shopifyOrigCents = item.original_price || item.price;
           const shopifyOrigDollars = shopifyOrigCents * item.quantity / 100;
@@ -799,7 +800,7 @@
     if (!selectedSku || selectedSku === 'null') selectedSku = product.variants?.[0]?.sku || product.sku || '';
     if (!selectedSku) { _upsellPending = false; resetBtn(); return; }
     const vitrineMap = await getVitrineSkuMap();
-    const vitrineEntry = vitrineMap[selectedSku.toUpperCase()];
+    const vitrineEntry = vitrineMap[selectedSku];
     const vitrineVariantId = vitrineEntry?.id || vitrineEntry;
     if (!vitrineVariantId) { console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku); _upsellPending = false; resetBtn(); return; }
     // Track this SKU as an upsell addition
@@ -832,6 +833,12 @@
     _refreshTimer = setTimeout(async () => {
       try {
         let cart = await fetchShopifyCart();
+        // Retry if Shopify returned stale data (eventual consistency)
+        if (_lastCartToken && cart.token === _lastCartToken) {
+          await new Promise(r => setTimeout(r, 250));
+          cart = await fetchShopifyCart();
+        }
+        _lastCartToken = cart.token;
         window._lastCart = cart;
         if (_cartReady && window._cfConfig) {
           _lastSkus = '';
@@ -884,22 +891,21 @@
 
     document.addEventListener('submit', async (e) => {
       const form = e.target;
-      if (form.tagName !== 'FORM') return;
-      const action = form.action || '';
-      if (!action.includes('/cart/add')) return;
-
-      // Prevent page redirect (native /cart/add returns HTML redirect)
-      e.preventDefault();
-
-      const formData = new FormData(form);
-
-      try {
-        await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
-          method: 'POST',
-          body: formData
-        });
-        debouncedCartRefresh(true);
-      } catch(err) { console.warn('[CF] form submit error', err); }
+      if (form.tagName === 'FORM' && (form.action || '').includes('/cart/add')) {
+        e.preventDefault();
+        // No stopPropagation — let other apps (tracking, bundles) process the event
+        const formData = new FormData(form);
+        const body = {};
+        formData.forEach((val, key) => { body[key] = val; });
+        try {
+          await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: [{ id: Number(body.id), quantity: Number(body.quantity || 1) }] })
+          });
+          debouncedCartRefresh(true);
+        } catch(e) {}
+      }
     }, { capture: true });
 
     document.addEventListener('click', async (e) => {
