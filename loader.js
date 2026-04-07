@@ -851,7 +851,8 @@ if (window._cfConfig) {
           const url = await buildCheckoutUrl(cart.items, window._cfConfig);
           trackEvent('checkout', cart.total_price/100);
           window.location.href = url || '/checkout';
-        } catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
+       } catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
+        finally { setTimeout(() => { btn.disabled=false; btn.innerHTML=origHtml; }, 3000); }
         return;
       }
       // FIX 3: Triggers expandidos para todos os temas
