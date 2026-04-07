@@ -12,8 +12,9 @@
   let _spActive = false;
   let _gwActive = false;
   let _lastSkus = '';
-let _vitrineSkuMap = null;
-let _lastCart = null;
+  let _vitrineSkuMap = null;
+  let _lastCart = null;
+  let _upsellPending = false; // FIX: evitar checkout enquanto upsell adiciona
 
   function onCartReady() {
     _cartReady = true;
@@ -22,6 +23,7 @@ let _lastCart = null;
       fetchShopifyCart().then(async cart => {
         if (window._cfConfig) {
           await fetchUpsells(cart);
+          window._lastCart = cart;
           renderCart(cart, window._cfConfig);
           openCart();
         }
@@ -29,17 +31,7 @@ let _lastCart = null;
     }
   }
 
-  // ── Helpers ──
-  function formatPrice(cents) {
-    const amount = cents / 100;
-    const currency = window.Shopify?.currency?.active || 'USD';
-    try { return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount); }
-    catch (e) { return `${currency} ${amount.toFixed(2)}`; }
-  }
-
-  function formatPriceDollars(val) {
-    return '$' + Number(val).toFixed(2);
-  }
+  function formatPriceDollars(val) { return '$' + Number(val).toFixed(2); }
 
   function contrastText(hex) {
     if (!hex || hex.length < 7) return '#000000';
@@ -72,7 +64,6 @@ let _lastCart = null;
     return 0;
   }
 
-  // ── SVG Icons ──
   const SVG_ICONS = {
     truck: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>',
     tag: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>',
@@ -85,6 +76,7 @@ let _lastCart = null;
     lock: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
     close: (sw) => `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     check: '<svg width="10" height="10" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    spin: '<svg style="animation:cf-spin 0.8s linear infinite;width:18px;height:18px;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-opacity="0.3"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>',
   };
 
   const PRESETS = {
@@ -93,7 +85,6 @@ let _lastCart = null;
     protected_support: 'Protected purchase + 24/7 support',
   };
 
-  // ── Config ──
   async function getConfig(skus) {
     try {
       const url = `${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`;
@@ -103,7 +94,7 @@ let _lastCart = null;
     } catch(e) { return null; }
   }
 
-  // ── Vitrine SKU Map (cache) — guarda id + compare_at_price ──
+  // FIX PERF: Vitrine SKU map carrega em background e cacheia imagens
   async function getVitrineSkuMap() {
     if (_vitrineSkuMap) return _vitrineSkuMap;
     try {
@@ -135,25 +126,15 @@ let _lastCart = null;
     return _vitrineSkuMap;
   }
 
-  // ── Fetch upsells ──
   async function fetchUpsells(cart) {
     const skus = (cart.items || []).map(i => i.sku).filter(Boolean).join(',');
-    if (!skus) {
-      if (window._cfConfig) window._cfConfig.upsells = [];
-      _lastSkus = '';
-      return;
-    }
+    if (!skus) { if (window._cfConfig) window._cfConfig.upsells = []; _lastSkus = ''; return; }
     if (skus === _lastSkus) return;
     _lastSkus = skus;
     try {
       const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`);
-      if (r.ok) {
-        const data = await r.json();
-        if (window._cfConfig) window._cfConfig.upsells = data.upsells || [];
-      }
-    } catch(e) {
-      console.warn('[CartFlow] fetchUpsells error:', e);
-    }
+      if (r.ok) { const data = await r.json(); if (window._cfConfig) window._cfConfig.upsells = data.upsells || []; }
+    } catch(e) { console.warn('[CartFlow] fetchUpsells error:', e); }
   }
 
   function trackEvent(type, amount=0, metadata={}) {
@@ -167,7 +148,6 @@ let _lastCart = null;
     return dw === 'narrow' ? '360px' : dw === 'wide' ? '500px' : '420px';
   }
 
-  // ── Timer ──
   let _timerInterval = null;
   let _timerSeconds = 0;
 
@@ -178,10 +158,7 @@ let _lastCart = null;
     if (parts.length === 4) _timerSeconds = parts[0]*86400 + parts[1]*3600 + parts[2]*60 + parts[3];
     else if (parts.length === 3) _timerSeconds = parts[0]*3600 + parts[1]*60 + parts[2];
     else _timerSeconds = parts[0]*60 + parts[1];
-    _timerInterval = setInterval(() => {
-      if (_timerSeconds > 0) { _timerSeconds--; updateTimerDisplay(); }
-      else clearInterval(_timerInterval);
-    }, 1000);
+    _timerInterval = setInterval(() => { if (_timerSeconds > 0) { _timerSeconds--; updateTimerDisplay(); } else clearInterval(_timerInterval); }, 1000);
   }
 
   function formatTimer(s) {
@@ -220,7 +197,6 @@ let _lastCart = null;
     `).join('');
   }
 
-  // ── Styles ──
   function injectStyles(v) {
     const dw = getDrawerWidth(v);
     const mw = v.cart_width_mobile === 'default' ? '90vw' : '100vw';
@@ -238,38 +214,44 @@ let _lastCart = null;
         font-family:${v.inherit_fonts ? 'inherit' : 'system-ui,sans-serif'};
       }
       #cf-drawer.open { right:0; }
-#cf-body { flex:1;overflow-y:auto;display:flex;flex-direction:column; }
+      #cf-body { flex:1;overflow-y:auto;display:flex;flex-direction:column; }
       .cf-empty { text-align:center;padding:48px 16px;color:#999; }
       .cf-empty-icon { font-size:40px;margin-bottom:12px; }
-      /* FIX 4: Rodapé sempre com a cor accent configurada */
-      #cf-footer {
-        flex-shrink:0;
-        border-top:1px solid rgba(0,0,0,0.08);
-        background:${footerBg} !important;
-        color:${contrastText(footerBg)};
-      }
+      #cf-footer { flex-shrink:0;border-top:1px solid rgba(0,0,0,0.08);background:${footerBg} !important;color:${contrastText(footerBg)}; }
+      /* Ocultar carrinhos nativos — temas gratuitos e pagos */
       cart-drawer,cart-notification,.cart-drawer,.cart-notification,#cart-drawer,#CartDrawer,
       #cart-notification,[id*="cart-drawer"],[class*="cart-drawer"],drawer-component[id*="cart"],
-      .shopify-section-cart-drawer { display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
+      .shopify-section-cart-drawer,.mini-cart,.js-mini-cart,#mini-cart-wrapper,
+      .cart-flyout,.header-cart-flyout,.drawer--cart,#CartSpecialDrawer,.ajaxcart,.ajax-cart,
+      [data-cart-drawer],[data-mini-cart],.side-cart,.slide-cart,.cart-sidebar
+      { display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
       #cf-checkout {
-        all: unset !important;
-        box-sizing: border-box !important;
-        width: 100% !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        gap: 8px !important;
-        border: none !important;
-        cursor: pointer !important;
-        text-transform: uppercase !important;
-        height: 46px !important;
-        font-size: 14px !important;
-        font-weight: 600 !important;
-        background: ${v.button_color||'#000'} !important;
-        color: ${v.button_text_color||'#fff'} !important;
-        border-radius: ${v.button_radius||0}px !important;
+        all: unset !important;box-sizing: border-box !important;width: 100% !important;
+        display: flex !important;align-items: center !important;justify-content: center !important;
+        gap: 8px !important;border: none !important;cursor: pointer !important;
+        text-transform: uppercase !important;height: 46px !important;font-size: 14px !important;
+        font-weight: 600 !important;background: ${v.button_color||'#000'} !important;
+        color: ${v.button_text_color||'#fff'} !important;border-radius: ${v.button_radius||0}px !important;
         box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
         transition: background-color 0.15s ease, opacity 0.15s ease !important;
+      }
+      /* Anti-conflito temas */
+      #cf-overlay *, #cf-drawer * { box-sizing:border-box !important; }
+      #cf-drawer *::before, #cf-drawer *::after,
+      #cf-overlay *::before, #cf-overlay *::after { content:none !important; display:none !important; }
+      /* CSS reset dentro do drawer para isolar de temas agressivos */
+      #cf-drawer * {
+        font-family: inherit;
+        line-height: normal;
+        letter-spacing: normal;
+      }
+      #cf-drawer button:not(#cf-checkout):not(#cf-close) {
+        all: unset;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box !important;
       }
       @keyframes cf-spin { to { transform: rotate(360deg); } }
       @media (max-width:480px) { #cf-drawer { width:${mw};right:-${mw}; } }
@@ -277,7 +259,6 @@ let _lastCart = null;
     document.head.appendChild(style);
   }
 
-  // ── HTML ──
   function injectHTML(v) {
     const overlay = document.createElement('div');
     overlay.id = 'cf-overlay';
@@ -294,7 +275,6 @@ let _lastCart = null;
     const headerTitleHtml = v.header_title_type === 'logo' && v.header_logo_url
       ? `<img id="cf-header-logo" src="${v.header_logo_url}" alt="Logo" style="height:${v.header_logo_size||32}px;object-fit:contain;" />`
       : `<${v.header_heading_level||'h3'} id="cf-title-el" style="font-size:${hd.fs}px;font-weight:${hd.fw};margin:0;${v.header_text_color_override?'color:'+v.header_text_color_override+';':''}">Cart • 0</${v.header_heading_level||'h3'}>`;
-
     overlay.innerHTML = `
       <div id="cf-drawer">
         <div id="cf-header" style="padding:${headerPy} 16px;display:flex;align-items:center;flex-shrink:0;background:${v.header_bg_color||'#FFFFFF'};${v.header_border_thickness!=='none'?'border-bottom:'+bdr+' solid '+(v.header_border_color||'#e5e7eb')+';':''}${isCloseLeft?'flex-direction:row-reverse;':''}">
@@ -303,14 +283,14 @@ let _lastCart = null;
             ${SVG_ICONS.close(closeSw)}
           </button>
         </div>
-<div id="cf-body">
+        <div id="cf-body">
           <div id="cf-ann-before"></div>
           <div id="cf-rewards"></div>
           <div id="cf-upsells-top"></div>
           <div id="cf-items"></div>
           <div id="cf-ann-after"></div>
           <div id="cf-upsells-bottom"></div>
-          <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
+          <div id="cf-addon-section" style="padding-bottom:16px"></div>
         </div>
         <div id="cf-footer">
           <div id="cf-badges-top"></div>
@@ -329,7 +309,6 @@ let _lastCart = null;
       </div>
     `;
     document.body.appendChild(overlay);
-
     const closeBtn = document.getElementById('cf-close');
     if (closeBtn) {
       closeBtn.onmouseenter = () => { closeBtn.style.background = v.close_bg_hover_color||'#f3f4f6'; closeBtn.style.color = v.close_icon_hover_color||'#666'; };
@@ -353,7 +332,6 @@ let _lastCart = null;
     document.body.style.overflow = '';
   }
 
-  // ── Upsell variant selects ──
   function buildUpsellVariantHtml(product, v) {
     const variants = product.variants || [];
     const meaningful = variants.filter(vr => vr.option_value && vr.option_value !== 'Default Title' && vr.option_value.trim() !== '');
@@ -400,17 +378,16 @@ let _lastCart = null;
       const vrKey = (vr.option_value||'').split('/').map(p => p.trim()).join(' / ');
       return vrKey === selectedKey;
     });
-if (match?.sku) {
-  wrapper.setAttribute('data-cf-selected-sku', match.sku);
-  if (match.image_url) {
-    const productId = wrapper.getAttribute('data-cf-product-id');
-const img = document.getElementById(`cf-upsell-img-${productId}`);
-if (img) img.src = match.image_url;
-  }
-}
+    if (match?.sku) {
+      wrapper.setAttribute('data-cf-selected-sku', match.sku);
+      if (match.image_url) {
+        const pid = wrapper.getAttribute('data-cf-product-id');
+        const img = document.getElementById(`cf-upsell-img-${pid}`);
+        if (img) img.src = match.image_url;
+      }
+    }
   };
 
-  // ── Render ──
   function renderCart(cart, config) {
     const v = config.visual || {};
     const items = cart.items || [];
@@ -418,11 +395,9 @@ if (img) img.src = match.image_url;
     const accentColor = v.accent_color || '#f6f6f7';
     const accentTextColor = contrastText(accentColor);
 
-    // Title
     const titleEl = document.getElementById('cf-title-el');
     if (titleEl) titleEl.textContent = (v.header_title_text||'Cart • {{cart_quantity}}').replace('{{cart_quantity}}', count);
 
-    // Announcement
     const annBefore = document.getElementById('cf-ann-before');
     const annAfter = document.getElementById('cf-ann-after');
     if (annBefore) annBefore.innerHTML = '';
@@ -442,10 +417,6 @@ if (img) img.src = match.image_url;
       }
     }
 
-    // ── Rewards ──
-    // FIX 1: rewards_calculation=quantity com 1 item mostrava "Add 2 more"
-    // porque o tier_order=1 tem minimum_value=1, então com simValue=1 já está
-    // desbloqueado. O nextT deve ser o próximo tier NÃO desbloqueado.
     const rwEl = document.getElementById('cf-rewards');
     const tiers = config.rewards || [];
     const showOnEmpty = v.rewards_show_on_empty !== false;
@@ -470,33 +441,22 @@ if (img) img.src = match.image_url;
           const existing = byType.get(tier.reward_type);
           if (!existing || amount > existing.amount) byType.set(tier.reward_type, { amount, label });
         }
-       byType.forEach(({ amount, label }) => { rewardDiscount += amount; activeRewardLabels.push(label); });
-for (const tier of unlockedTiers) {
-  if (tier.reward_type === 'shipping' || tier.reward_type === 'free_shipping') {
-    if (!activeRewardLabels.includes(tier.reward_description)) {
-      activeRewardLabels.push(tier.reward_description);
-    }
-  }
-}
-
-        // FIX 1: nextT é o próximo tier com minimum_value > simValue (estritamente maior)
-const nextT = sorted.find(t => t.minimum_value > simValue);
-const rem = nextT ? (isQty ? `${nextT.minimum_value - simValue}` : `$${(nextT.minimum_value - simValue).toFixed(0)}`) : null;
-
-// Mostrar apenas 1 mensagem: próximo tier ou completo
-let rawText = '';
-if (!nextT) {
-  rawText = (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
-} else if (nextT.title_before) {
-  rawText = nextT.title_before
-    .replace('{remaining}', String(rem))
-    .replace('{{remaining}}', String(rem))
-    .replace('{{count}}', String(rem))
-    .replace('{count}', String(rem));
-} else {
-  rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
-}
-
+        byType.forEach(({ amount, label }) => { rewardDiscount += amount; activeRewardLabels.push(label); });
+        for (const tier of unlockedTiers) {
+          if (tier.reward_type === 'shipping' || tier.reward_type === 'free_shipping') {
+            if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
+          }
+        }
+        const nextT = sorted.find(t => t.minimum_value > simValue);
+        const rem = nextT ? (isQty ? `${nextT.minimum_value - simValue}` : `$${(nextT.minimum_value - simValue).toFixed(0)}`) : null;
+        let rawText = '';
+        if (!nextT) {
+          rawText = (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
+        } else if (nextT.title_before) {
+          rawText = nextT.title_before.replace('{remaining}', String(rem)).replace('{{remaining}}', String(rem)).replace('{{count}}', String(rem)).replace('{count}', String(rem));
+        } else {
+          rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
+        }
         let barHtml = '<div style="display:flex;align-items:center;gap:0">';
         let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
         sorted.forEach((tier, idx) => {
@@ -519,7 +479,6 @@ if (!nextT) {
       }
     }
 
-    // ── Items ──
     const itemsEl = document.getElementById('cf-items');
     if (itemsEl) {
       if (items.length === 0) {
@@ -530,35 +489,19 @@ if (!nextT) {
         itemsEl.innerHTML = items.map((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
-
-          // FIX 3: Usar compare_at_price do vitrine SKU map para detectar desconto
           const vitrineEntry = _vitrineSkuMap?.[item.sku];
-          const compareAtPriceDollars = vitrineEntry?.compare_at_price
-            ? vitrineEntry.compare_at_price * item.quantity
-            : null;
-
-          // Fallback: usar original_price do Shopify se disponível
+          const compareAtPriceDollars = vitrineEntry?.compare_at_price ? vitrineEntry.compare_at_price * item.quantity : null;
           const shopifyOrigCents = item.original_price || item.price;
           const shopifyOrigDollars = shopifyOrigCents * item.quantity / 100;
-
-          // Preço de comparação: prefere compare_at_price do vitrine
           const lineCompareDollars = compareAtPriceDollars || shopifyOrigDollars;
-
           const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
           const itemRewardDiscount = rewardDiscount * itemShare;
           const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
-
-          // Tem desconto se compare > preço atual OU reward aplicou desconto
           const hasCompareDiscount = lineCompareDollars > lineTotalDollars;
           const hasRewardDiscount = itemRewardDiscount > 0;
           const hasDis = hasCompareDiscount || hasRewardDiscount;
-
-          // Preço a mostrar: se tem reward, aplica sobre preço atual
           const displayPrice = hasRewardDiscount ? discountedTotal : lineTotalDollars;
-
-          // Economia total
           const totalSavingsItem = lineCompareDollars - displayPrice;
-
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
@@ -568,32 +511,30 @@ if (!nextT) {
             variantLabel = item.variant_title;
           }
           const borderBottom = idx < items.length-1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
-
           return `
             <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
               <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;">
-                <img src="${item.image||item.featured_image?.url||''}"
-onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" />
+                <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" />
               </div>
               <div style="flex:1;min-width:0">
-                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-                  <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;margin:0">${productTitle}</p>
-                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;flex-shrink:0;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
+                <div style="display:flex;justify-content:flex-end">
+                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px">
-                  <div style="display:flex;flex-direction:column;gap:4px">
-                    ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0">${variantLabel}</p>` : ''}
-                    <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;margin-top:4px;overflow:hidden;width:fit-content;">
-                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
-                      <span style="box-sizing:border-box;font-size:13px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
-                      <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
-                    </div>
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:2px">
+                  <p style="font-size:15px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
+                  ${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through;flex-shrink:0">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+                  ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0;flex:1">${variantLabel}</p>` : '<div style="flex:1"></div>'}
+                  <span style="font-size:16px;font-weight:700;flex-shrink:0">${formatPriceDollars(displayPrice)}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+                  <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
+                    <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
+                    <span style="box-sizing:border-box;font-size:13px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
+                    <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                   </div>
-                  <div style="display:flex;flex-direction:column;align-items:flex-end;padding-right:4px">
-                    ${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
-                    <span style="font-size:16px;font-weight:700">${formatPriceDollars(displayPrice)}</span>
-                    ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<span style="font-size:11px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;margin-top:2px;">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
-                  </div>
+                  ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<span style="font-size:11px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;flex-shrink:0;">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
                 </div>
               </div>
             </div>`;
@@ -601,7 +542,6 @@ onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;heig
       }
     }
 
-    // ── Upsells ──
     const upsells = config.upsells || [];
     const topEl = document.getElementById('cf-upsells-top');
     const btmEl = document.getElementById('cf-upsells-bottom');
@@ -618,9 +558,11 @@ onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;heig
             ${upsells.map(p => {
               const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
               const variantHtml = buildUpsellVariantHtml(p, v);
+              const imgSrc = p.image_url || p.variants?.[0]?.image_url || '';
               return `
                 <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
-${(p.image_url || p.variants?.[0]?.image_url) ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0"><img id="cf-upsell-img-${p.id}" src="${p.image_url || p.variants?.[0]?.image_url}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}                  <div style="flex:1;min-width:0">
+                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
+                  <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
                     <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
                       ${hasCompare ? `<span style="font-size:12px;text-decoration:line-through;opacity:0.5">${formatPriceDollars(p.compare_price)}</span>` : ''}
@@ -628,7 +570,8 @@ ${(p.image_url || p.variants?.[0]?.image_url) ? `<div style="width:80px;height:8
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
                       ${variantHtml}
-<button id="cf-upsell-btn-${p.id}" onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 32px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85">${v.upsells_button_text||'+Add'}</button>                    </div>
+                      <button id="cf-upsell-btn-${p.id}" onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 16px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85;white-space:nowrap">${v.upsells_button_text||'+Add'}</button>
+                    </div>
                   </div>
                 </div>`;
             }).join('')}
@@ -638,7 +581,6 @@ ${(p.image_url || p.variants?.[0]?.image_url) ? `<div style="width:80px;height:8
       if (target) target.innerHTML = html;
     }
 
-    // ── Add-ons ──
     const addonEl = document.getElementById('cf-addon-section');
     if (addonEl) {
       addonEl.innerHTML = '';
@@ -659,7 +601,6 @@ ${(p.image_url || p.variants?.[0]?.image_url) ? `<div style="width:80px;height:8
       if (addonHtml) addonEl.innerHTML = addonHtml;
     }
 
-    // FIX 2: Trust badges — verificar todas as condições corretamente
     const badgesTop = document.getElementById('cf-badges-top');
     const badgesBot = document.getElementById('cf-badges-bottom');
     if (badgesTop) badgesTop.innerHTML = '';
@@ -669,32 +610,24 @@ ${(p.image_url || p.variants?.[0]?.image_url) ? `<div style="width:80px;height:8
       const badgePreset = v.trust_badges_preset || '';
       const badgeSize = v.trust_badges_image_size || 100;
       const badgePos = v.trust_badges_position || 'below';
-
-      // Preset images hospedadas no Supabase
       const PRESET_IMAGES = {
         payment_icons: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/payment-icons-transparent.png',
         returns_warranty: 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/trust-badges/free-return-guarantee-transparent.png',
       };
-
       let badgeHtml = '';
       if (badgeImgUrl) {
-        // Imagem customizada
         badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${badgeImgUrl}" alt="Trust Badge" style="width:${badgeSize}%;max-width:100%;object-fit:contain;display:block;margin:0 auto"/></div>`;
       } else if (PRESET_IMAGES[badgePreset]) {
-        // Imagem preset do Supabase
         badgeHtml = `<div style="text-align:center;padding:8px 16px"><img src="${PRESET_IMAGES[badgePreset]}" alt="Trust Badge" style="width:${badgeSize}%;max-width:100%;object-fit:contain;display:block;margin:0 auto"/></div>`;
       } else if (PRESETS[badgePreset]) {
-        // Texto preset fallback
         badgeHtml = `<div style="text-align:center;padding:8px 16px;font-size:11px;opacity:0.6">${SVG_ICONS.shield} ${PRESETS[badgePreset]}</div>`;
       }
-
       if (badgeHtml) {
         const target = badgePos === 'above' ? badgesTop : badgesBot;
         if (target) target.innerHTML = badgeHtml;
       }
     }
 
-    // ── Subtotal ──
     const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
     const rawSubtotalDollars = rawSubtotalCents / 100;
     let addonTotal = 0;
@@ -707,23 +640,22 @@ ${(p.image_url || p.variants?.[0]?.image_url) ? `<div style="width:80px;height:8
     const subtotalEl = document.getElementById('cf-subtotal');
     if (subtotalEl) subtotalEl.textContent = formatPriceDollars(finalSubtotal);
 
-    // FIX 5: Tags de desconto com layout correto (badge estilizado)
     const discRow = document.getElementById('cf-discounts-row');
     if (discRow) {
-if (activeRewardLabels.length > 0) {
+      if (activeRewardLabels.length > 0) {
         discRow.style.display = 'flex';
-const textColor = v.text_color || '#000';
-const savingsColor = v.savings_color || '#22c55e';
-const labelsHtml = activeRewardLabels.map(label =>
-  `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${textColor}">${label}</span>`
-).join(' ');
-discRow.innerHTML = `
-  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-    <span style="color:${savingsColor};font-weight:500">Discounts</span>
-    ${labelsHtml}
-  </div>
-  ${rewardDiscount > 0 ? `<span style="color:${savingsColor};font-weight:600;white-space:nowrap">-${formatPriceDollars(rewardDiscount)}</span>` : ''}
-`;
+        const textColor = v.text_color || '#000';
+        const savingsColor = v.savings_color || '#22c55e';
+        const labelsHtml = activeRewardLabels.map(label =>
+          `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${textColor}">${label}</span>`
+        ).join(' ');
+        discRow.innerHTML = `
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="color:${savingsColor};font-weight:500">Discounts</span>
+            ${labelsHtml}
+          </div>
+          ${rewardDiscount > 0 ? `<span style="color:${savingsColor};font-weight:600;white-space:nowrap">-${formatPriceDollars(rewardDiscount)}</span>` : ''}
+        `;
       } else {
         discRow.style.display = 'none';
         discRow.innerHTML = '';
@@ -737,7 +669,6 @@ discRow.innerHTML = `
     if (contWrap) contWrap.innerHTML = v.show_continue_shopping ? `<button onclick="closeCart()" style="all:unset;box-sizing:border-box;width:100%;display:block;text-align:center;font-size:13px;margin-top:8px;cursor:pointer;opacity:0.6;text-decoration:underline">Continue Shopping</button>` : '';
   }
 
-  // ── Checkout ──
   async function buildCheckoutUrl(cartItems, config) {
     const routing = config?.routing || {};
     const skuMap = routing.sku_map || {};
@@ -762,73 +693,61 @@ discRow.innerHTML = `
     return checkoutUrl;
   }
 
-  // ── Addon Toggle ──
   window.cfToggleAddon = (type) => {
     if (type === 'sp') _spActive = !_spActive;
     if (type === 'gw') _gwActive = !_gwActive;
     fetchShopifyCart().then(cart => { if (window._cfConfig) renderCart(cart, window._cfConfig); });
   };
 
-  // ── Global Functions ──
-window.cfQty = async (key, qty) => {
-  if (qty < 0) return;
-  await (window._cfOrigFetch||fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
-  const cart = await fetchShopifyCart();
-  window._lastCart = cart;
-  if (window._cfConfig) renderCart(cart, window._cfConfig);
-};
+  window.cfQty = async (key, qty) => {
+    if (qty < 0) return;
+    await (window._cfOrigFetch||fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
+    const cart = await fetchShopifyCart();
+    window._lastCart = cart;
+    if (window._cfConfig) renderCart(cart, window._cfConfig);
+  };
 
-  // ── Add Upsell ──
-window.cfAddUpsell = async (productId) => {
-  if (!productId) return;
-  const btn = document.getElementById(`cf-upsell-btn-${productId}`);
-  if (btn) { btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; }
+  // FIX 3: cfAddUpsell — atualiza _lastCart antes de permitir checkout
+  window.cfAddUpsell = async (productId) => {
+    if (!productId || _upsellPending) return;
+    _upsellPending = true;
+    const btn = document.getElementById(`cf-upsell-btn-${productId}`);
+    if (btn) { btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.innerHTML = SVG_ICONS.spin + ' Adding...'; }
     const upsells = window._cfConfig?.upsells || [];
     const product = upsells.find(p => p.id === productId);
-    if (!product) { console.warn('[CartFlow] Upsell not found:', productId); return; }
-
+    if (!product) { _upsellPending = false; return; }
     const card = document.querySelector(`[data-cf-upsell-card="${productId}"]`);
     const wrapper = card?.querySelector('[data-cf-selected-sku]');
     let selectedSku = wrapper?.getAttribute('data-cf-selected-sku') || '';
-    if (!selectedSku || selectedSku === 'null') {
-      selectedSku = product.variants?.[0]?.sku || product.sku || '';
-    }
-    if (!selectedSku) { console.warn('[CartFlow] No SKU for upsell:', product.title); return; }
-
+    if (!selectedSku || selectedSku === 'null') selectedSku = product.variants?.[0]?.sku || product.sku || '';
+    if (!selectedSku) { _upsellPending = false; return; }
     const vitrineMap = await getVitrineSkuMap();
     const vitrineEntry = vitrineMap[selectedSku];
     const vitrineVariantId = vitrineEntry?.id || vitrineEntry;
-
-    if (!vitrineVariantId) {
-      console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku);
-      return;
-    }
-
+    if (!vitrineVariantId) { console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku); _upsellPending = false; return; }
     try {
       const res = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: [{ id: vitrineVariantId, quantity: 1 }] })
       });
-      if (!res.ok) { console.warn('[CartFlow] Failed:', await res.text()); return; }
-    } catch(e) { console.warn('[CartFlow] Add error:', e); return; }
-
-const cart = await fetchShopifyCart();
+      if (!res.ok) { console.warn('[CartFlow] Failed:', await res.text()); _upsellPending = false; return; }
+    } catch(e) { console.warn('[CartFlow] Add error:', e); _upsellPending = false; return; }
+    const cart = await fetchShopifyCart();
+    window._lastCart = cart; // FIX: garantir que _lastCart está atualizado antes do checkout
     if (window._cfConfig) {
       _lastSkus = '';
       await fetchUpsells(cart);
-      window._lastCart = cart;
       renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
-    // Restaurar botão após renderCart (busca novamente pois o DOM foi reconstruído)
+    _upsellPending = false;
     const btnAfter = document.getElementById(`cf-upsell-btn-${productId}`);
     if (btnAfter) { btnAfter.style.opacity = '0.85'; btnAfter.style.pointerEvents = 'auto'; }
   };
 
   window.closeCart = closeCart;
 
-  // ── Intercept ──
   function interceptCart() {
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     window.fetch = async (...args) => {
@@ -839,6 +758,7 @@ const cart = await fetchShopifyCart();
           const clone = await result.clone().json();
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
             const cart = await fetchShopifyCart();
+            window._lastCart = cart;
             if (_cartReady && window._cfConfig) {
               _lastSkus = '';
               await fetchUpsells(cart);
@@ -851,6 +771,59 @@ const cart = await fetchShopifyCart();
       return result;
     };
 
+    // FIX 1: Interceptar XMLHttpRequest (PageFly usa XHR)
+    const origXHROpen = XMLHttpRequest.prototype.open;
+    const origXHRSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+      this._cfUrl = String(url);
+      return origXHROpen.apply(this, [method, url, ...rest]);
+    };
+    XMLHttpRequest.prototype.send = function(body) {
+      const url = this._cfUrl || '';
+      if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
+        this.addEventListener('load', async () => {
+          try {
+            const cart = await fetchShopifyCart();
+            window._lastCart = cart;
+            if (_cartReady && window._cfConfig) {
+              _lastSkus = '';
+              await fetchUpsells(cart);
+              renderCart(cart, window._cfConfig);
+              if (url.includes('/cart/add')) openCart();
+            } else if (url.includes('/cart/add')) { _pendingOpen = true; }
+          } catch(e) {}
+        });
+      }
+      return origXHRSend.apply(this, arguments);
+    };
+
+    // FIX 2: Interceptar form submit
+    document.addEventListener('submit', async (e) => {
+      const form = e.target;
+      if (form.tagName === 'FORM' && (form.action || '').includes('/cart/add')) {
+        e.preventDefault();
+        e.stopPropagation();
+        const formData = new FormData(form);
+        const body = {};
+        formData.forEach((val, key) => { body[key] = val; });
+        try {
+          await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: [{ id: Number(body.id), quantity: Number(body.quantity || 1) }] })
+          });
+          const cart = await fetchShopifyCart();
+          window._lastCart = cart;
+          if (_cartReady && window._cfConfig) {
+            _lastSkus = '';
+            await fetchUpsells(cart);
+            renderCart(cart, window._cfConfig);
+            openCart();
+          } else { _pendingOpen = true; }
+        } catch(e) {}
+      }
+    }, { capture: true });
+
     document.addEventListener('click', async (e) => {
       const t = e.target;
       if (t.id==='cf-close'||t.closest('#cf-close')||t.id==='cf-overlay') { closeCart(); return; }
@@ -860,52 +833,56 @@ const cart = await fetchShopifyCart();
         if(!btn||btn.disabled) return;
         btn.disabled = true;
         const origHtml = btn.innerHTML;
-btn.innerHTML = `<svg style="animation:cf-spin 0.8s linear infinite;width:18px;height:18px;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-opacity="0.3"/><path d="M12 2a10 10 0 0 1 10 10"/></svg> SECURE CHECKOUT`;        try { const cart=window._lastCart||await fetchShopifyCart(); const url=await buildCheckoutUrl(cart.items,window._cfConfig); trackEvent('checkout',cart.total_price/100); window.location.href=url||'/checkout'; }
-        catch(e){ btn.disabled=false; btn.innerHTML=origHtml; }
+        btn.innerHTML = `${SVG_ICONS.spin} SECURE CHECKOUT`;
+        try {
+          // FIX 4: Se upsell ainda está sendo adicionado, busca carrinho fresh
+          const cart = _upsellPending ? await fetchShopifyCart() : (window._lastCart || await fetchShopifyCart());
+          window._lastCart = cart;
+          const url = await buildCheckoutUrl(cart.items, window._cfConfig);
+          trackEvent('checkout', cart.total_price/100);
+          window.location.href = url || '/checkout';
+        } catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
         return;
       }
-      const triggers=['[href="/cart"]','.cart-icon-bubble','[data-cart-toggle]','.header__icon--cart','[aria-label="Cart"]','[aria-label="Open cart"]','.cart-count-bubble','#cart-icon-bubble'];
-if (triggers.some(sel => t.matches?.(sel)||t.closest?.(sel))) {
-  e.preventDefault(); e.stopPropagation();
-  // Mostrar cache instantaneamente
-  if(window._cfConfig && window._lastCart) {
-    renderCart(window._lastCart, window._cfConfig);
-  }
-  openCart();
-  // Atualizar em background
-  const cart = await fetchShopifyCart();
-  window._lastCart = cart;
-  if(window._cfConfig) renderCart(cart, window._cfConfig);
-}
-}, { passive: false, capture: true });
+      // FIX 3: Triggers expandidos para todos os temas
+      const triggers = [
+        '[href="/cart"]', '.cart-icon-bubble', '[data-cart-toggle]',
+        '.header__icon--cart', '[aria-label="Cart"]', '[aria-label="Open cart"]',
+        '.cart-count-bubble', '#cart-icon-bubble',
+        '.js-cart-toggle', '.cart-link', '.site-header__cart',
+        '.Header__CartIcon', '[data-action="toggle-cart"]',
+        '.cart-toggle', '#mini-cart', '.js-drawer-open-right',
+        '.cart-page-link', '.header-cart-btn', '.icon-cart',
+        'a[href*="/cart"]', 'button[class*="cart"]',
+      ];
+      if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } catch(e) { return false; } })) {
+        e.preventDefault(); e.stopPropagation();
+        if(window._cfConfig && window._lastCart) renderCart(window._lastCart, window._cfConfig);
+        openCart();
+        const cart = await fetchShopifyCart();
+        window._lastCart = cart;
+        if(window._cfConfig) renderCart(cart, window._cfConfig);
+      }
+    }, { passive: false, capture: true });
   }
 
-  // ── Init ──
   try {
-    // Salvar fetch original ANTES de tudo
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
-
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
-
-    // Carregar config e vitrine SKU map em paralelo
-const config = await getConfig(initialSkus);
-// Carregar vitrine SKU map em background (não bloqueia)
-getVitrineSkuMap();
-
+    const config = await getConfig(initialSkus);
+    // FIX PERF: Carregar vitrine SKU map em background sem bloquear
+    getVitrineSkuMap();
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
-
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
     interceptCart();
-
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
-window._lastCart = initialCart;
-renderCart(initialCart, config);
-onCartReady();
-
+    window._lastCart = initialCart;
+    renderCart(initialCart, config);
+    onCartReady();
     trackEvent('cart_impression');
     console.log('[CartFlow] ✓ Loaded');
     console.log('[CartFlow] Store:', config.routing?.active_store?.name||'none');
