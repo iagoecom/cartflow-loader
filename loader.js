@@ -356,7 +356,13 @@
 
   function buildUpsellVariantHtml(product, v) {
     const variants = product.variants || [];
-    const meaningful = variants.filter(vr => vr.option_value && vr.option_value !== 'Default Title' && vr.option_value.trim() !== '');
+    const meaningful = variants.filter(vr => {
+      const val = (vr.option_value||'').trim();
+      const name = (vr.option_name||'').trim();
+      if (!val || val === 'Default' || val === 'Default Title') return false;
+      if (name === 'Title') return false;
+      return true;
+    });
     if (meaningful.length === 0) {
       return '';
     }
@@ -490,7 +496,7 @@
           const reached = simValue >= (parseFloat(tier.minimum_value)||0);
           const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
           const circleSize = reached ? 28 : 20;
-          barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'} !important"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'} !important;transition:width 0.4s;width:${lp}%"></div></div>`;
+          barHtml += `<div style="all:unset !important;box-sizing:border-box !important;display:block !important;flex:1 !important;border-radius:9999px !important;overflow:hidden !important;height:${v.rewards_bar_height||8}px !important;background:linear-gradient(to right,${v.rewards_bar_fg_color||'#303030'} ${lp}%,${v.rewards_bar_bg_color||'#efefef'} ${lp}%) !important"></div>`;
           barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'} !important;color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'} !important">`;
           barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
           barHtml += '</div>';
