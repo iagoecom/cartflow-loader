@@ -490,7 +490,8 @@
           const reached = simValue >= (parseFloat(tier.minimum_value)||0);
           const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
           const circleSize = reached ? 28 : 20;
-          barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'} !important;color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'} !important">`;
+          barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'}"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'};transition:width 0.4s;width:${lp}%"></div></div>`;
+          barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'};color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'}">`;
           barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
           barHtml += '</div>';
           labelsHtml += '<div style="flex:1">\u200B</div>';
@@ -561,6 +562,13 @@
             const delBtn = existing.querySelector('[data-cf-del]');
             if (delBtn) delBtn.setAttribute('onclick', `cfQty('${item.key}',0)`);
             existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
+            const tagsEl = existing.querySelector('[data-cf-reward-tags]');
+            if (tagsEl) {
+              if (activeRewardLabels.length > 0) {
+                tagsEl.style.display = 'flex';
+                tagsEl.innerHTML = activeRewardLabels.map(label => `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:${fs(9)}px;font-weight:600;text-transform:uppercase;border:1px solid ${v.savings_color||'#22c55e'};color:${v.savings_color||'#22c55e'}">${label}</span>`).join('');
+              } else { tagsEl.style.display = 'none'; }
+            }
           } else {
             const div = document.createElement('div');
             div.innerHTML = `
@@ -584,9 +592,12 @@
                     <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
                     <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
                     <span data-cf-plus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
-                  </div>
-                </div>
-              </div>
+                   </div>
+                 </div>
+                 <div data-cf-reward-tags style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;${activeRewardLabels.length > 0 ? '' : 'display:none'}">
+                   ${activeRewardLabels.map(label => `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:${fs(9)}px;font-weight:600;text-transform:uppercase;border:1px solid ${v.savings_color||'#22c55e'};color:${v.savings_color||'#22c55e'}">${label}</span>`).join('')}
+                 </div>
+               </div>
             </div>`;
             const newNode = div.firstElementChild;
             if (itemsEl.children[idx]) itemsEl.insertBefore(newNode, itemsEl.children[idx]);
