@@ -25,6 +25,8 @@
   let _lastCart = null;
   let _upsellPending = false;
   let _addedUpsellSkus = new Set();
+  let _refreshTimer = null;
+  let _lastCartToken = null;
   const SCALE_MAP = { small: 1, medium: 1.15, large: 1.3 };
   let _fontScale = 1.15;
   const fs = (base) => Math.round(base * _fontScale);
@@ -356,7 +358,7 @@
     const variants = product.variants || [];
     const meaningful = variants.filter(vr => vr.option_value && vr.option_value !== 'Default Title' && vr.option_value.trim() !== '');
     if (meaningful.length === 0) {
-      return `<span data-cf-product-id="${product.id}" data-cf-selected-sku="${variants[0]?.sku||''}" style="display:flex;gap:8px;flex:1;min-width:0"></span>`;
+      return '';
     }
     const optionGroups = new Map();
     for (const vr of meaningful) {
@@ -478,18 +480,18 @@
         } else {
           rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
         }
-let barHtml = '<div style="display:flex;align-items:center;gap:0">';
-let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
-sorted.forEach((tier, idx) => {
-  const segStart = idx===0 ? 0 : parseFloat(sorted[idx-1].minimum_value)||0;
+        let barHtml = '<div style="display:flex;align-items:center;gap:0">';
+        let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
+        sorted.forEach((tier, idx) => {
+          const segStart = idx===0 ? 0 : parseFloat(sorted[idx-1].minimum_value)||0;
           const segEnd = parseFloat(tier.minimum_value)||0;
           const segRange = segEnd - segStart;
           const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
           const reached = simValue >= (parseFloat(tier.minimum_value)||0);
           const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
           const circleSize = reached ? 28 : 20;
-          barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'}"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'};transition:width 0.4s;width:${lp}%"></div></div>`;
-          barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'};color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'}">`;
+          barHtml += `<div style="flex:1;border-radius:9999px;overflow:hidden;height:${v.rewards_bar_height||8}px;background:${v.rewards_bar_bg_color||'#efefef'} !important"><div style="height:100%;border-radius:9999px;background:${v.rewards_bar_fg_color||'#303030'} !important;transition:width 0.4s;width:${lp}%"></div></div>`;
+          barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'} !important;color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'} !important">`;
           barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
           barHtml += '</div>';
           labelsHtml += '<div style="flex:1">\u200B</div>';
@@ -583,9 +585,9 @@ sorted.forEach((tier, idx) => {
                     <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
                     <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
                     <span data-cf-plus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
-                  </div>
-                </div>
-              </div>
+                   </div>
+                 </div>
+               </div>
             </div>`;
             const newNode = div.firstElementChild;
             if (itemsEl.children[idx]) itemsEl.insertBefore(newNode, itemsEl.children[idx]);
@@ -636,7 +638,7 @@ sorted.forEach((tier, idx) => {
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
                       ${variantHtml}
-                      <button id="cf-upsell-btn-${p.id}" onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 16px;flex-shrink:0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85;white-space:nowrap">${v.upsells_button_text||'+Add'}</button>
+                      <button id="cf-upsell-btn-${p.id}" onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 16px;${variantHtml ? 'flex-shrink:0;' : 'width:100%;'}font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85;white-space:nowrap">${v.upsells_button_text||'+Add'}</button>
                     </div>
                   </div>
                 </div>`;
@@ -819,7 +821,34 @@ sorted.forEach((tier, idx) => {
 
   window.closeCart = closeCart;
 
+  // Debounced cart refresh — groups rapid add/change calls (bundles, etc.)
+  function debouncedCartRefresh(openAfter) {
+    clearTimeout(_refreshTimer);
+    _refreshTimer = setTimeout(async () => {
+      try {
+        let cart = await fetchShopifyCart();
+        // Retry if Shopify returned stale data (eventual consistency)
+        if (_lastCartToken && cart.token === _lastCartToken) {
+          await new Promise(r => setTimeout(r, 250));
+          cart = await fetchShopifyCart();
+        }
+        _lastCartToken = cart.token;
+        window._lastCart = cart;
+        if (_cartReady && window._cfConfig) {
+          _lastSkus = '';
+          await fetchUpsells(cart);
+          renderCart(cart, window._cfConfig);
+          if (openAfter) openCart();
+        } else if (openAfter) { _pendingOpen = true; }
+      } catch(e) {}
+    }, 300);
+  }
+
   function interceptCart() {
+    // Guard: prevent double-patching if script loads twice
+    if (window._cfFetchPatched) return;
+    window._cfFetchPatched = true;
+
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
@@ -828,14 +857,7 @@ sorted.forEach((tier, idx) => {
         try {
           const clone = await result.clone().json();
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
-            const cart = await fetchShopifyCart();
-            window._lastCart = cart;
-            if (_cartReady && window._cfConfig) {
-              _lastSkus = '';
-              await fetchUpsells(cart);
-              renderCart(cart, window._cfConfig);
-              if (url.includes('/cart/add')) openCart();
-            } else if (url.includes('/cart/add')) { _pendingOpen = true; }
+            debouncedCartRefresh(url.includes('/cart/add'));
           }
         } catch(e){}
       }
@@ -851,17 +873,11 @@ sorted.forEach((tier, idx) => {
     XMLHttpRequest.prototype.send = function(body) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
-        this.addEventListener('load', async () => {
-          try {
-            const cart = await fetchShopifyCart();
-            window._lastCart = cart;
-            if (_cartReady && window._cfConfig) {
-              _lastSkus = '';
-              await fetchUpsells(cart);
-              renderCart(cart, window._cfConfig);
-              if (url.includes('/cart/add')) openCart();
-            } else if (url.includes('/cart/add')) { _pendingOpen = true; }
-          } catch(e) {}
+        this.addEventListener('load', () => {
+          // Small delay to let Shopify persist the change before we read /cart.js
+          setTimeout(() => {
+            debouncedCartRefresh(url.includes('/cart/add'));
+          }, 50);
         });
       }
       return origXHRSend.apply(this, arguments);
@@ -871,7 +887,7 @@ sorted.forEach((tier, idx) => {
       const form = e.target;
       if (form.tagName === 'FORM' && (form.action || '').includes('/cart/add')) {
         e.preventDefault();
-        e.stopPropagation();
+        // No stopPropagation — let other apps (tracking, bundles) process the event
         const formData = new FormData(form);
         const body = {};
         formData.forEach((val, key) => { body[key] = val; });
@@ -881,14 +897,7 @@ sorted.forEach((tier, idx) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ items: [{ id: Number(body.id), quantity: Number(body.quantity || 1) }] })
           });
-          const cart = await fetchShopifyCart();
-          window._lastCart = cart;
-          if (_cartReady && window._cfConfig) {
-            _lastSkus = '';
-            await fetchUpsells(cart);
-            renderCart(cart, window._cfConfig);
-            openCart();
-          } else { _pendingOpen = true; }
+          debouncedCartRefresh(true);
         } catch(e) {}
       }
     }, { capture: true });
