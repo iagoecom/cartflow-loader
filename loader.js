@@ -85,19 +85,45 @@
     protected_support: 'Protected purchase + 24/7 support',
   };
 
-  async function getConfig(skus) {
+async function getConfig(skus) {
+    const cacheKey = `cf_config_${TOKEN}`;
     try {
+      // Tentar carregar do cache primeiro
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        // Atualizar em background sem bloquear
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(fresh => {
+            if (fresh) {
+              sessionStorage.setItem(cacheKey, JSON.stringify(fresh));
+              window._cfConfig = fresh;
+            }
+          }).catch(()=>{});
+        return parsed;
+      }
+      // Primeira visita — busca normal
       const url = `${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`;
       const r = await fetch(url);
       if (!r.ok) return null;
-      return await r.json();
+      const data = await r.json();
+      sessionStorage.setItem(cacheKey, JSON.stringify(data));
+      return data;
     } catch(e) { return null; }
   }
 
   // FIX PERF: Vitrine SKU map carrega em background e cacheia imagens
-  async function getVitrineSkuMap() {
+async function getVitrineSkuMap() {
     if (_vitrineSkuMap) return _vitrineSkuMap;
     try {
+      // Tentar cache do sessionStorage
+      const cached = sessionStorage.getItem('cf_sku_map');
+      if (cached) {
+        _vitrineSkuMap = JSON.parse(cached);
+        console.log('[CartFlow] SKU map from cache:', Object.keys(_vitrineSkuMap).length);
+        return _vitrineSkuMap;
+      }
       _vitrineSkuMap = {};
       let page = 1;
       while (true) {
@@ -118,6 +144,8 @@
         if (data.products.length < 250) break;
         page++;
       }
+      // Salvar no cache após carregar tudo
+      sessionStorage.setItem('cf_sku_map', JSON.stringify(_vitrineSkuMap));
       console.log('[CartFlow] Vitrine SKU map:', Object.keys(_vitrineSkuMap).length, 'variants');
     } catch(e) {
       console.warn('[CartFlow] Vitrine map error:', e);
