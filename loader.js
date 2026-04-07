@@ -85,12 +85,22 @@
     protected_support: 'Protected purchase + 24/7 support',
   };
 
-  async function getConfig(skus) {
+async function getConfig(skus) {
+    const cacheKey = `cf_config_${TOKEN}`;
     try {
-      const url = `${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`;
-      const r = await fetch(url);
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(fresh => { if (fresh) { sessionStorage.setItem(cacheKey, JSON.stringify(fresh)); window._cfConfig = fresh; } }).catch(()=>{});
+        return parsed;
+      }
+      const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`);
       if (!r.ok) return null;
-      return await r.json();
+      const data = await r.json();
+      sessionStorage.setItem(cacheKey, JSON.stringify(data));
+      return data;
     } catch(e) { return null; }
   }
 
@@ -735,9 +745,9 @@
     } catch(e) { console.warn('[CartFlow] Add error:', e); _upsellPending = false; return; }
     const cart = await fetchShopifyCart();
     window._lastCart = cart; // FIX: garantir que _lastCart está atualizado antes do checkout
-    if (window._cfConfig) {
+if (window._cfConfig) {
       _lastSkus = '';
-      await fetchUpsells(cart);
+      fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
