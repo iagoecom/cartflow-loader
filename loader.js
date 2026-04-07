@@ -25,8 +25,6 @@
   let _lastCart = null;
   let _upsellPending = false;
   let _addedUpsellSkus = new Set();
-  let _refreshTimer = null;
-  let _lastCartToken = null;
   const SCALE_MAP = { small: 1, medium: 1.15, large: 1.3 };
   let _fontScale = 1.15;
   const fs = (base) => Math.round(base * _fontScale);
@@ -562,13 +560,6 @@
             const delBtn = existing.querySelector('[data-cf-del]');
             if (delBtn) delBtn.setAttribute('onclick', `cfQty('${item.key}',0)`);
             existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
-            const tagsEl = existing.querySelector('[data-cf-reward-tags]');
-            if (tagsEl) {
-              if (activeRewardLabels.length > 0) {
-                tagsEl.style.display = 'flex';
-                tagsEl.innerHTML = activeRewardLabels.map(label => `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:${fs(9)}px;font-weight:600;text-transform:uppercase;border:1px solid ${v.savings_color||'#22c55e'};color:${v.savings_color||'#22c55e'}">${label}</span>`).join('');
-              } else { tagsEl.style.display = 'none'; }
-            }
           } else {
             const div = document.createElement('div');
             div.innerHTML = `
@@ -592,12 +583,9 @@
                     <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
                     <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
                     <span data-cf-plus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
-                   </div>
-                 </div>
-                 <div data-cf-reward-tags style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;${activeRewardLabels.length > 0 ? '' : 'display:none'}">
-                   ${activeRewardLabels.map(label => `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:${fs(9)}px;font-weight:600;text-transform:uppercase;border:1px solid ${v.savings_color||'#22c55e'};color:${v.savings_color||'#22c55e'}">${label}</span>`).join('')}
-                 </div>
-               </div>
+                  </div>
+                </div>
+              </div>
             </div>`;
             const newNode = div.firstElementChild;
             if (itemsEl.children[idx]) itemsEl.insertBefore(newNode, itemsEl.children[idx]);
@@ -831,34 +819,7 @@
 
   window.closeCart = closeCart;
 
-  // Debounced cart refresh — groups rapid add/change calls (bundles, etc.)
-  function debouncedCartRefresh(openAfter) {
-    clearTimeout(_refreshTimer);
-    _refreshTimer = setTimeout(async () => {
-      try {
-        let cart = await fetchShopifyCart();
-        // Retry if Shopify returned stale data (eventual consistency)
-        if (_lastCartToken && cart.token === _lastCartToken) {
-          await new Promise(r => setTimeout(r, 250));
-          cart = await fetchShopifyCart();
-        }
-        _lastCartToken = cart.token;
-        window._lastCart = cart;
-        if (_cartReady && window._cfConfig) {
-          _lastSkus = '';
-          await fetchUpsells(cart);
-          renderCart(cart, window._cfConfig);
-          if (openAfter) openCart();
-        } else if (openAfter) { _pendingOpen = true; }
-      } catch(e) {}
-    }, 300);
-  }
-
   function interceptCart() {
-    // Guard: prevent double-patching if script loads twice
-    if (window._cfFetchPatched) return;
-    window._cfFetchPatched = true;
-
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
@@ -867,7 +828,14 @@
         try {
           const clone = await result.clone().json();
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
-            debouncedCartRefresh(url.includes('/cart/add'));
+            const cart = await fetchShopifyCart();
+            window._lastCart = cart;
+            if (_cartReady && window._cfConfig) {
+              _lastSkus = '';
+              await fetchUpsells(cart);
+              renderCart(cart, window._cfConfig);
+              if (url.includes('/cart/add')) openCart();
+            } else if (url.includes('/cart/add')) { _pendingOpen = true; }
           }
         } catch(e){}
       }
@@ -883,11 +851,17 @@
     XMLHttpRequest.prototype.send = function(body) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
-        this.addEventListener('load', () => {
-          // Small delay to let Shopify persist the change before we read /cart.js
-          setTimeout(() => {
-            debouncedCartRefresh(url.includes('/cart/add'));
-          }, 50);
+        this.addEventListener('load', async () => {
+          try {
+            const cart = await fetchShopifyCart();
+            window._lastCart = cart;
+            if (_cartReady && window._cfConfig) {
+              _lastSkus = '';
+              await fetchUpsells(cart);
+              renderCart(cart, window._cfConfig);
+              if (url.includes('/cart/add')) openCart();
+            } else if (url.includes('/cart/add')) { _pendingOpen = true; }
+          } catch(e) {}
         });
       }
       return origXHRSend.apply(this, arguments);
@@ -897,7 +871,7 @@
       const form = e.target;
       if (form.tagName === 'FORM' && (form.action || '').includes('/cart/add')) {
         e.preventDefault();
-        // No stopPropagation — let other apps (tracking, bundles) process the event
+        e.stopPropagation();
         const formData = new FormData(form);
         const body = {};
         formData.forEach((val, key) => { body[key] = val; });
@@ -907,7 +881,14 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ items: [{ id: Number(body.id), quantity: Number(body.quantity || 1) }] })
           });
-          debouncedCartRefresh(true);
+          const cart = await fetchShopifyCart();
+          window._lastCart = cart;
+          if (_cartReady && window._cfConfig) {
+            _lastSkus = '';
+            await fetchUpsells(cart);
+            renderCart(cart, window._cfConfig);
+            openCart();
+          } else { _pendingOpen = true; }
         } catch(e) {}
       }
     }, { capture: true });
