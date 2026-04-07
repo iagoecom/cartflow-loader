@@ -1029,6 +1029,23 @@
     injectHTML(config.visual||{});
     interceptCart();
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
+    let _pollCount = initialCart.item_count || 0;
+setInterval(async () => {
+  if (document.getElementById('cf-drawer')?.classList.contains('open')) return;
+  try {
+    const cart = await fetchShopifyCart();
+    if (cart.item_count !== _pollCount) {
+      _pollCount = cart.item_count;
+      window._lastCart = cart;
+      if (window._cfConfig) {
+        _lastSkus = '';
+        await fetchUpsells(cart);
+        renderCart(cart, window._cfConfig);
+        openCart();
+      }
+    }
+  } catch(e) {}
+}, 1500);
     window._lastCart = initialCart;
     renderCart(initialCart, config);
     onCartReady();
