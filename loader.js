@@ -891,21 +891,47 @@
 
     document.addEventListener('submit', async (e) => {
       const form = e.target;
-      if (form.tagName === 'FORM' && (form.action || '').includes('/cart/add')) {
-        e.preventDefault();
-        // No stopPropagation — let other apps (tracking, bundles) process the event
-        const formData = new FormData(form);
-        const body = {};
-        formData.forEach((val, key) => { body[key] = val; });
-        try {
-          await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items: [{ id: Number(body.id), quantity: Number(body.quantity || 1) }] })
-          });
-          debouncedCartRefresh(true);
-        } catch(e) {}
+      if (form.tagName !== 'FORM') return;
+      const action = form.action || '';
+      if (!action.includes('/cart/add')) return;
+
+      // Prevent page redirect (native /cart/add returns HTML redirect)
+      e.preventDefault();
+
+      // Collect ALL FormData fields — preserves bundle items[], quantities, properties, etc.
+      const formData = new FormData(form);
+
+      // Check if FormData contains items[] array (bundle apps)
+      const itemIds = formData.getAll('items[][id]');
+      const itemQtys = formData.getAll('items[][quantity]');
+
+      let payload;
+      if (itemIds.length > 0) {
+        // Bundle format: items[][id], items[][quantity], etc.
+        payload = { items: itemIds.map((id, i) => ({
+          id: Number(id),
+          quantity: Number(itemQtys[i] || 1)
+        })) };
+      } else {
+        // Standard single-product form: id + quantity
+        const id = formData.get('id');
+        const quantity = formData.get('quantity') || 1;
+        // Collect product properties (e.g. properties[Gift Message])
+        const properties = {};
+        formData.forEach((val, key) => {
+          if (key.startsWith('properties[')) properties[key.replace('properties[','').replace(']','')] = val;
+        });
+        payload = { items: [{ id: Number(id), quantity: Number(quantity), ...(Object.keys(properties).length ? { properties } : {}) }] };
       }
+
+      try {
+        await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        debouncedCartRefresh(true);
+      } catch(err) { console.warn('[CF] form submit error', err); }
     }, { capture: true });
 
     document.addEventListener('click', async (e) => {
