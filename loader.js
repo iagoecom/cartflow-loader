@@ -115,8 +115,9 @@ async function getConfig(skus) {
 
   // FIX PERF: Vitrine SKU map carrega em background e cacheia imagens
 async function getVitrineSkuMap() {
-    if (_vitrineSkuMap && Object.keys(_vitrineSkuMap).length > 0) return _vitrineSkuMap;
+    if (_vitrineSkuMap) return _vitrineSkuMap;
     try {
+      // Tentar cache do sessionStorage
       const cached = sessionStorage.getItem('cf_sku_map');
       if (cached) {
         _vitrineSkuMap = JSON.parse(cached);
@@ -143,6 +144,7 @@ async function getVitrineSkuMap() {
         if (data.products.length < 250) break;
         page++;
       }
+      // Salvar no cache após carregar tudo
       sessionStorage.setItem('cf_sku_map', JSON.stringify(_vitrineSkuMap));
       console.log('[CartFlow] Vitrine SKU map:', Object.keys(_vitrineSkuMap).length, 'variants');
     } catch(e) {
@@ -151,7 +153,8 @@ async function getVitrineSkuMap() {
     }
     return _vitrineSkuMap;
   }
-    async function fetchUpsells(cart) {
+
+  async function fetchUpsells(cart) {
     const skus = (cart.items || []).map(i => i.sku).filter(Boolean).join(',');
     if (!skus) { if (window._cfConfig) window._cfConfig.upsells = []; _lastSkus = ''; return; }
     if (skus === _lastSkus) return;
@@ -735,8 +738,7 @@ async function getVitrineSkuMap() {
   // FIX 3: cfAddUpsell — atualiza _lastCart antes de permitir checkout
   window.cfAddUpsell = async (productId) => {
     if (!productId || _upsellPending) return;
-   _upsellPending = true;
-    setTimeout(() => { _upsellPending = false; }, 8000);
+    _upsellPending = true;
     const btn = document.getElementById(`cf-upsell-btn-${productId}`);
     if (btn) { btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.innerHTML = SVG_ICONS.spin + ' Adding...'; }
     const upsells = window._cfConfig?.upsells || [];
@@ -761,9 +763,9 @@ async function getVitrineSkuMap() {
     } catch(e) { console.warn('[CartFlow] Add error:', e); _upsellPending = false; return; }
     const cart = await fetchShopifyCart();
     window._lastCart = cart; // FIX: garantir que _lastCart está atualizado antes do checkout
-if (window._cfConfig) {
+    if (window._cfConfig) {
       _lastSkus = '';
-      fetchUpsells(cart); // sem await — não bloqueia
+      await fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
@@ -899,9 +901,7 @@ if (window._cfConfig) {
     _lastSkus = initialSkus;
     const config = await getConfig(initialSkus);
     // FIX PERF: Carregar vitrine SKU map em background sem bloquear
-    getVitrineSkuMap().then(map => {
-  console.log('[CartFlow] SKU map ready:', Object.keys(map).length);
-});
+    getVitrineSkuMap();
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
     injectStyles(config.visual||{});
