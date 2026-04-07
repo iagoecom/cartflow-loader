@@ -305,8 +305,8 @@ async function getConfig(skus) {
         <div id="cf-footer">
           <div id="cf-badges-top"></div>
           <div class="cf-footer-inner" style="padding:12px 16px;">
-            <div id="cf-discounts-row" style="display:none;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:8px;"></div>
-            <div id="cf-subtotal-row" style="display:flex;justify-content:space-between;font-size:15px;margin-bottom:8px;">
+            <div id="cf-discounts-row" style="display:none;align-items:center;justify-content:space-between;font-size:${fs(12)}px;margin-bottom:8px;"></div>
+            <div id="cf-subtotal-row" style="display:flex;justify-content:space-between;font-size:${fs(15)}px;margin-bottom:8px;">
               <span style="font-weight:500">Subtotal:</span>
               <span id="cf-subtotal" style="font-weight:700"></span>
             </div>
@@ -404,6 +404,9 @@ async function getConfig(skus) {
     const count = items.reduce((a,i) => a + i.quantity, 0);
     const accentColor = v.accent_color || '#f6f6f7';
     const accentTextColor = contrastText(accentColor);
+    const SCALE_MAP = { small: 1, medium: 1.15, large: 1.3 };
+    const fontScale = SCALE_MAP[v.font_scale] || 1.15;
+    const fs = (base) => Math.round(base * fontScale);
 
     const titleEl = document.getElementById('cf-title-el');
     if (titleEl) titleEl.textContent = (v.header_title_text||'Cart • {{cart_quantity}}').replace('{{cart_quantity}}', count);
@@ -481,11 +484,11 @@ async function getConfig(skus) {
           barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'};color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'}">`;
           barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
           barHtml += '</div>';
-          labelsHtml += '<div style="flex:1"></div>';
+          labelsHtml += '<div style="flex:1">\u200B</div>';
           labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
         });
         barHtml += '</div>'; labelsHtml += '</div>';
-        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${v.rewards_font_size||14}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
+        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:hidden;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${fs(v.rewards_font_size||14)}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
       }
     }
 
@@ -522,30 +525,28 @@ async function getConfig(skus) {
           }
           const borderBottom = idx < items.length-1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
           return `
-            <div style="display:flex;gap:12px;padding:16px;${borderBottom}">
-              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;">
+            <div style="display:flex;align-items:start;gap:12px;padding:16px;${borderBottom}">
+              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:start;justify-content:center;">
                 <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" />
               </div>
               <div style="flex:1;min-width:0">
-                <div style="display:flex;justify-content:flex-end">
-                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:2px">
-                  <p style="font-size:15px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
-                  ${v.show_strikethrough && hasDis ? `<span style="font-size:12px;opacity:0.5;text-decoration:line-through;flex-shrink:0">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
+                <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                  <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
+                  <span role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-                  ${variantLabel ? `<p style="font-size:12px;opacity:0.6;margin:0;flex:1">${variantLabel}</p>` : '<div style="flex:1"></div>'}
-                  <span style="font-size:16px;font-weight:700;flex-shrink:0">${formatPriceDollars(displayPrice)}</span>
+                  ${variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0;flex:1">${variantLabel}</p>` : '<div style="flex:1"></div>'}
+                  ${v.show_strikethrough && hasDis ? `<span style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;flex-shrink:0">${formatPriceDollars(lineCompareDollars)}</span>` : ''}
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
                   <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
                     <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
-                    <span style="box-sizing:border-box;font-size:13px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
+                    <span style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
                     <span role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                   </div>
-                  ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<span style="font-size:11px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;flex-shrink:0;">Save ${formatPriceDollars(totalSavingsItem)}</span>` : ''}
+                  <span style="font-size:${fs(16)}px;font-weight:700;flex-shrink:0">${formatPriceDollars(displayPrice)}</span>
                 </div>
+                ${v.show_strikethrough && totalSavingsItem > 0.01 ? `<div style="display:flex;justify-content:flex-end;margin-top:4px"><span style="font-size:${fs(11)}px;font-weight:600;color:${v.savings_color||'#22c55e'};background:${v.savings_color ? v.savings_color+'18' : '#22c55e18'};padding:2px 6px;border-radius:4px;flex-shrink:0;">Save ${formatPriceDollars(totalSavingsItem)}</span></div>` : ''}
               </div>
             </div>`;
         }).join('');
@@ -563,7 +564,7 @@ async function getConfig(skus) {
       const isStack = (v.upsells_direction||'stack') !== 'inline';
       const html = `
         <div style="padding:12px 16px;border-top:1px solid rgba(0,0,0,0.08);margin-top:16px">
-          <p style="font-size:${v.upsells_title_font_size||14}px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-align:center;opacity:0.6;margin:0 0 12px 0">${v.upsells_title||'RECOMMENDED FOR YOU'}</p>
+          <p style="font-size:${fs(v.upsells_title_font_size||14)}px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-align:center;opacity:0.6;margin:0 0 12px 0">${v.upsells_title||'RECOMMENDED FOR YOU'}</p>
           <div style="display:flex;${isStack?'flex-direction:column;gap:12px':'gap:8px;overflow-x:auto'}">
             ${upsells.map(p => {
               const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
@@ -600,13 +601,13 @@ async function getConfig(skus) {
         const spDesc = v.sp_description||'Coverage against loss, damage, or theft.';
         const spPrice = Number(v.sp_price||4.99);
         const spPriceText = v.sp_price_type==='percentage' ? `${spPrice}%` : formatPriceDollars(spPrice);
-        addonHtml += `<div style="padding:12px 16px 0 16px"><div id="cf-addon-sp" onclick="window.cfToggleAddon('sp')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_spActive?'#059669':'rgba(0,0,0,0.10)'};background:${_spActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_spActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_spActive?SVG_ICONS.check:''}</div>${v.sp_icon?`<img src="${v.sp_icon}" alt="SP" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:12px;font-weight:600;margin:0">${spTitle}</p><p style="font-size:12px;opacity:0.6;margin:0">${spDesc}</p></div></div><span style="font-size:14px;font-weight:600;flex-shrink:0;margin-left:8px">${spPriceText}</span></div></div></div>`;
+        addonHtml += `<div style="padding:12px 16px 0 16px"><div id="cf-addon-sp" onclick="window.cfToggleAddon('sp')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_spActive?'#059669':'rgba(0,0,0,0.10)'};background:${_spActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_spActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_spActive?SVG_ICONS.check:''}</div>${v.sp_icon?`<img src="${v.sp_icon}" alt="SP" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:${fs(12)}px;font-weight:600;margin:0">${spTitle}</p><p style="font-size:${fs(12)}px;opacity:0.6;margin:0">${spDesc}</p></div></div><span style="font-size:${fs(14)}px;font-weight:600;flex-shrink:0;margin-left:8px">${spPriceText}</span></div></div></div>`;
       }
       if (v.gift_wrap_enabled) {
         const gwTitle = v.gw_title||'Gift Wrapping';
         const gwDesc = v.gw_description||'Beautiful gift wrapping for your order.';
         const gwPrice = Number(v.gift_wrap_price||2.99);
-        addonHtml += `<div style="padding:8px 16px 0 16px"><div id="cf-addon-gw" onclick="window.cfToggleAddon('gw')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_gwActive?'#059669':'rgba(0,0,0,0.10)'};background:${_gwActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_gwActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_gwActive?SVG_ICONS.check:''}</div>${v.gw_icon?`<img src="${v.gw_icon}" alt="GW" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:12px;font-weight:600;margin:0">${gwTitle}</p><p style="font-size:12px;opacity:0.6;margin:0">${gwDesc}</p></div></div><span style="font-size:14px;font-weight:600;flex-shrink:0;margin-left:8px">${formatPriceDollars(gwPrice)}</span></div></div></div>`;
+        addonHtml += `<div style="padding:8px 16px 0 16px"><div id="cf-addon-gw" onclick="window.cfToggleAddon('gw')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_gwActive?'#059669':'rgba(0,0,0,0.10)'};background:${_gwActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_gwActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_gwActive?SVG_ICONS.check:''}</div>${v.gw_icon?`<img src="${v.gw_icon}" alt="GW" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:${fs(12)}px;font-weight:600;margin:0">${gwTitle}</p><p style="font-size:${fs(12)}px;opacity:0.6;margin:0">${gwDesc}</p></div></div><span style="font-size:${fs(14)}px;font-weight:600;flex-shrink:0;margin-left:8px">${formatPriceDollars(gwPrice)}</span></div></div></div>`;
       }
       if (addonHtml) addonEl.innerHTML = addonHtml;
     }
@@ -657,7 +658,7 @@ async function getConfig(skus) {
         const textColor = v.text_color || '#000';
         const savingsColor = v.savings_color || '#22c55e';
         const labelsHtml = activeRewardLabels.map(label =>
-          `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${textColor}">${label}</span>`
+          `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:${fs(10)}px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${textColor}">${label}</span>`
         ).join(' ');
         discRow.innerHTML = `
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -676,7 +677,7 @@ async function getConfig(skus) {
     if (subtotalRow) subtotalRow.style.display = v.show_subtotal_line===false ? 'none' : 'flex';
 
     const contWrap = document.getElementById('cf-continue-wrap');
-    if (contWrap) contWrap.innerHTML = v.show_continue_shopping ? `<button onclick="closeCart()" style="all:unset;box-sizing:border-box;width:100%;display:block;text-align:center;font-size:13px;margin-top:8px;cursor:pointer;opacity:0.6;text-decoration:underline">Continue Shopping</button>` : '';
+    if (contWrap) contWrap.innerHTML = v.show_continue_shopping ? `<button onclick="closeCart()" style="all:unset;box-sizing:border-box;width:100%;display:block;text-align:center;font-size:${fs(13)}px;margin-top:8px;cursor:pointer;opacity:0.6;text-decoration:underline">Continue Shopping</button>` : '';
   }
 
   async function buildCheckoutUrl(cartItems, config) {
