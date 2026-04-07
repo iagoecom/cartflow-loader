@@ -735,7 +735,8 @@ async function getVitrineSkuMap() {
   // FIX 3: cfAddUpsell — atualiza _lastCart antes de permitir checkout
   window.cfAddUpsell = async (productId) => {
     if (!productId || _upsellPending) return;
-    _upsellPending = true;
+   _upsellPending = true;
+    setTimeout(() => { _upsellPending = false; }, 8000);
     const btn = document.getElementById(`cf-upsell-btn-${productId}`);
     if (btn) { btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.innerHTML = SVG_ICONS.spin + ' Adding...'; }
     const upsells = window._cfConfig?.upsells || [];
