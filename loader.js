@@ -760,9 +760,9 @@ async function getVitrineSkuMap() {
     } catch(e) { console.warn('[CartFlow] Add error:', e); _upsellPending = false; return; }
     const cart = await fetchShopifyCart();
     window._lastCart = cart; // FIX: garantir que _lastCart está atualizado antes do checkout
-    if (window._cfConfig) {
+if (window._cfConfig) {
       _lastSkus = '';
-      await fetchUpsells(cart);
+      fetchUpsells(cart); // sem await — não bloqueia
       renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
