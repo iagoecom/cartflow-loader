@@ -898,16 +898,78 @@
       // Prevent page redirect (native /cart/add returns HTML redirect)
       e.preventDefault();
 
-      // Send original FormData as-is — preserves ALL fields from bundle apps
-      // (items[][id], items[][quantity], selling_plan, properties, etc.)
       const formData = new FormData(form);
 
+      // Convert FormData to a JSON payload that Shopify /cart/add.js understands.
+      // Bundle apps (Kaching, etc.) use array notation: items[0][id], items[0][quantity]
+      // Shopify's /cart/add.js expects JSON: { items: [{ id, quantity, ... }] }
+      let jsonBody = null;
       try {
-        await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
-          method: 'POST',
-          body: formData
-          // No Content-Type header — browser sets multipart/form-data automatically
-        });
+        const entries = [...formData.entries()];
+        const hasArrayItems = entries.some(([k]) => /^items\[/.test(k));
+
+        if (hasArrayItems) {
+          // Parse items[N][key] into proper array
+          const itemsMap = {};
+          const extras = {};
+          for (const [key, val] of entries) {
+            const m = key.match(/^items\[(\d+)\]\[(\w+)\]$/);
+            if (m) {
+              const idx = m[1];
+              if (!itemsMap[idx]) itemsMap[idx] = {};
+              itemsMap[idx][m[2]] = val;
+            } else {
+              extras[key] = val;
+            }
+          }
+          const items = Object.keys(itemsMap).sort((a,b) => a-b).map(idx => {
+            const item = itemsMap[idx];
+            if (item.id) item.id = Number(item.id);
+            if (item.quantity) item.quantity = Number(item.quantity);
+            return item;
+          });
+          if (items.length > 0) {
+            jsonBody = { items, ...extras };
+          }
+        } else {
+          // Simple form: id + quantity
+          const id = formData.get('id');
+          const quantity = formData.get('quantity') || 1;
+          if (id) {
+            const payload = { items: [{ id: Number(id), quantity: Number(quantity) }] };
+            // Preserve selling_plan, properties, etc.
+            const sp = formData.get('selling_plan');
+            if (sp) payload.items[0].selling_plan = sp;
+            for (const [k, v] of entries) {
+              if (k.startsWith('properties[')) {
+                const pk = k.match(/^properties\[(.+)\]$/)?.[1];
+                if (pk) {
+                  if (!payload.items[0].properties) payload.items[0].properties = {};
+                  payload.items[0].properties[pk] = v;
+                }
+              }
+            }
+            jsonBody = payload;
+          }
+        }
+      } catch(parseErr) {
+        console.warn('[CF] FormData parse fallback', parseErr);
+      }
+
+      try {
+        if (jsonBody) {
+          await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(jsonBody)
+          });
+        } else {
+          // Fallback: send FormData as-is
+          await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+            method: 'POST',
+            body: formData
+          });
+        }
         debouncedCartRefresh(true);
       } catch(err) { console.warn('[CF] form submit error', err); }
     }, { capture: true });
