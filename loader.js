@@ -18,8 +18,8 @@
 
   let _cartReady = false;
   let _pendingOpen = false;
-  let _spActive = false;
-  let _gwActive = false;
+let _spActive = v.sp_pre_checked || false;
+let _gwActive = v.gw_pre_checked || false;
   let _lastSkus = '';
   let _vitrineSkuMap = null;
   let _lastCart = null;
