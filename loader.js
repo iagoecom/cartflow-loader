@@ -99,21 +99,25 @@
     protected_support: 'Protected purchase + 24/7 support',
   };
 
-  async function getConfig(skus) {
+async function getConfig(skus) {
     const cacheKey = `cf_config_${TOKEN}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
       if (cached) {
         const parsed = JSON.parse(cached);
+        _spActive = parsed.visual?.sp_pre_checked || false;
+        _gwActive = parsed.visual?.gw_pre_checked || false;
         fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
           .then(r => r.ok ? r.json() : null)
-          .then(fresh => { if (fresh) { sessionStorage.setItem(cacheKey, JSON.stringify(fresh)); window._cfConfig = fresh; } }).catch(()=>{});
+          .then(fresh => { if (fresh) { sessionStorage.setItem(cacheKey, JSON.stringify(fresh)); window._cfConfig = fresh; _spActive = fresh.visual?.sp_pre_checked || false; _gwActive = fresh.visual?.gw_pre_checked || false; } }).catch(()=>{});
         return parsed;
       }
       const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`);
       if (!r.ok) return null;
       const data = await r.json();
       sessionStorage.setItem(cacheKey, JSON.stringify(data));
+      _spActive = data.visual?.sp_pre_checked || false;
+      _gwActive = data.visual?.gw_pre_checked || false;
       return data;
     } catch(e) { return null; }
   }
