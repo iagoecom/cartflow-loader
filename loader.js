@@ -863,12 +863,20 @@ async function getConfig(skus) {
       const url = String(args[0]||'');
       const result = await window._cfOrigFetch.apply(window, args);
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
+        const isAdd = url.includes('/cart/add');
         try {
           const clone = await result.clone().json();
-         if (clone?.id || clone?.items || clone?.item_count !== undefined || clone?.sections || clone?.checkout_url) {
-            debouncedCartRefresh(url.includes('/cart/add'));
+          // Detecta resposta de carrinho normal E Sections API (temas modernos como Dawn, Refresh, Crave)
+          const isCartResponse = clone?.id || clone?.items || clone?.item_count !== undefined || clone?.sections || clone?.checkout_url;
+          if (isCartResponse || result.ok) {
+            debouncedCartRefresh(isAdd);
           }
-        } catch(e){}
+        } catch(e) {
+          // Se .json() falhar (resposta HTML em /cart/add sem .js), usa status HTTP como fallback
+          if (result.ok && isAdd) {
+            debouncedCartRefresh(true);
+          }
+        }
       }
       return result;
     };
@@ -883,10 +891,10 @@ async function getConfig(skus) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
         this.addEventListener('load', () => {
-          // Small delay to let Shopify persist the change before we read /cart.js
+          // Delay generoso para temas lentos persistirem antes de ler /cart.js
           setTimeout(() => {
             debouncedCartRefresh(url.includes('/cart/add'));
-          }, 50);
+          }, 200);
         });
       }
       return origXHRSend.apply(this, arguments);
@@ -911,6 +919,18 @@ async function getConfig(skus) {
         debouncedCartRefresh(true);
       } catch(err) { console.warn('[CF] form submit error', err); }
     }, { capture: true });
+
+    // Temas que disparam eventos customizados ao abrir carrinho (Impulse, Turbo, Pipeline, etc.)
+    const _cfCartOpenEvents = ['cart:open','cartDrawer:open','cart-drawer:open','theme:cart:open','drawer:open','CartDrawer:open'];
+    _cfCartOpenEvents.forEach(evName => {
+      document.addEventListener(evName, () => { if(window._cfConfig && window._lastCart) renderCart(window._lastCart, window._cfConfig); openCart(); }, true);
+    });
+
+    // Temas que disparam eventos de "item adicionado" customizados (ex: theme:cart:added)
+    const _cfCartAddedEvents = ['cart:item-added','cart:updated','theme:cart:added','product:added-to-cart'];
+    _cfCartAddedEvents.forEach(evName => {
+      document.addEventListener(evName, () => { debouncedCartRefresh(true); }, true);
+    });
 
     document.addEventListener('click', async (e) => {
       const t = e.target;
