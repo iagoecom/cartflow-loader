@@ -865,7 +865,7 @@ async function getConfig(skus) {
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
         try {
           const clone = await result.clone().json();
-          if (clone?.id || clone?.items || clone?.item_count !== undefined) {
+         if (clone?.id || clone?.items || clone?.item_count !== undefined || clone?.sections || clone?.checkout_url) {
             debouncedCartRefresh(url.includes('/cart/add'));
           }
         } catch(e){}
