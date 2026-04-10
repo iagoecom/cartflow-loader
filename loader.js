@@ -250,7 +250,8 @@ async function getConfig(skus) {
       #cart-notification,[id*="cart-drawer"],[class*="cart-drawer"],drawer-component[id*="cart"],
       .shopify-section-cart-drawer,.mini-cart,.js-mini-cart,#mini-cart-wrapper,
       .cart-flyout,.header-cart-flyout,.drawer--cart,#CartSpecialDrawer,.ajaxcart,.ajax-cart,
-      [data-cart-drawer],[data-mini-cart],.side-cart,.slide-cart,.cart-sidebar
+      [data-cart-drawer],[data-mini-cart],.side-cart,.slide-cart,.cart-sidebar,
+      cart-drawer-component,cart-drawer-component *
       { display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important; }
       #cf-checkout {
         all: unset !important;box-sizing: border-box !important;width: 100% !important;
@@ -863,12 +864,18 @@ async function getConfig(skus) {
       const url = String(args[0]||'');
       const result = await window._cfOrigFetch.apply(window, args);
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
+        const isAdd = url.includes('/cart/add');
         try {
           const clone = await result.clone().json();
-          if (clone?.id || clone?.items || clone?.item_count !== undefined) {
-            debouncedCartRefresh(url.includes('/cart/add'));
+          // Detecta resposta normal E Sections API (Dawn, Refresh) E Horizon (retorna sections no body)
+          const isCartResponse = clone?.id || clone?.items || clone?.item_count !== undefined || clone?.sections || clone?.checkout_url;
+          if (isCartResponse || result.ok) {
+            debouncedCartRefresh(isAdd);
           }
-        } catch(e){}
+        } catch(e) {
+          // Fallback: se .json() falhar mas status OK, ainda assim refresha
+          if (result.ok && isAdd) debouncedCartRefresh(true);
+        }
       }
       return result;
     };
@@ -883,14 +890,32 @@ async function getConfig(skus) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
         this.addEventListener('load', () => {
-          // Small delay to let Shopify persist the change before we read /cart.js
           setTimeout(() => {
             debouncedCartRefresh(url.includes('/cart/add'));
-          }, 50);
+          }, 200); // aumentado para dar tempo ao Shopify persistir
         });
       }
       return origXHRSend.apply(this, arguments);
     };
+
+    // === HORIZON THEME ===
+    // O Horizon usa o evento customizado 'cart:update' com source='product-form-component'
+    // para abrir o seu cart-drawer-component nativo. Interceptamos no capture phase
+    // para suprimir o drawer nativo e abrir o nosso no lugar.
+    document.addEventListener('cart:update', (e) => {
+      try {
+        e.stopImmediatePropagation();
+        debouncedCartRefresh(true);
+      } catch(_) {}
+    }, true);
+
+    // Outros eventos customizados de temas (Impulse, Turbo, Pipeline, etc.)
+    ['cart:open','cartDrawer:open','cart-drawer:open','theme:cart:open'].forEach(evName => {
+      document.addEventListener(evName, () => { if(window._cfConfig && window._lastCart) renderCart(window._lastCart, window._cfConfig); openCart(); }, true);
+    });
+    ['cart:item-added','theme:cart:added','product:added-to-cart'].forEach(evName => {
+      document.addEventListener(evName, () => { debouncedCartRefresh(true); }, true);
+    });
 
     document.addEventListener('submit', async (e) => {
       const form = e.target;
