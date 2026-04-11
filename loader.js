@@ -795,7 +795,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     trackingKeys.forEach(function(k) {
       var val = pageParams.get(k) || storedTracking[k] || null;
       if (val) {
-        checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + k + '=' + encodeURIComponent(val);
+checkoutUrl += ... + 'attributes[' + k + ']=' + encodeURIComponent(val);
       }
     });
     if (bestCoupon?.shopify_coupon) checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'discount=' + encodeURIComponent(bestCoupon.shopify_coupon);
