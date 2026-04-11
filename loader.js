@@ -1158,8 +1158,6 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   try {
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
 
-    // Detect visitor currency (v4)
-    _visitorCurrency = detectVisitorCurrency();
 
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
@@ -1169,6 +1167,12 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
     _storeCurrency = config.visual?.store_currency || 'USD';
+
+    // Detect visitor currency (v5 — opt-in only)
+    if (config.visual?.currency_conversion_enabled === true) {
+      _visitorCurrency = detectVisitorCurrency();
+    }
+
     _fontScale = SCALE_MAP[config.visual?.font_scale] || 1.15;
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
@@ -1178,7 +1182,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     renderCart(initialCart, config);
     onCartReady();
     trackEvent('cart_impression');
-    console.log('[CartFlow] ✓ Loaded v4');
+    console.log('[CartFlow] ✓ Loaded v5');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
