@@ -1137,7 +1137,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           trackEvent('checkout', cart.total_price/100);
           flushTrackQueue();
           window.location.replace(url || '/checkout');
-       } catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
+} catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
+       finally { setTimeout(() => { btn.disabled=false; btn.innerHTML=origHtml; }, 3000); }
         return;
       }
       const triggers = [
