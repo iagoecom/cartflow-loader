@@ -1097,7 +1097,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         let cart = await fetchShopifyCart();
         window._lastCart = cart;
         if (_cartReady && window._cfConfig) {
-          _lastSkus = '';
           await fetchUpsells(cart);
           renderCart(cart, window._cfConfig);
           if (openAfter) openCart();
@@ -1113,19 +1112,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
-      // Optimistic UI: open drawer immediately on add-to-cart
-      if (url.includes('/cart/add') && !url.includes('_cf=1') && !url.includes('track-event') && !url.includes('config')) {
-        
-        if(window._lastCart && window._cfConfig){renderCart(window._lastCart,window._cfConfig);}
-      openCart();
-      }
       const result = await window._cfOrigFetch.apply(window, args);
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
         try {
           const clone = await result.clone().json();
           // Optimistic render: show added item immediately
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
-            debouncedCartRefresh(false);
+            debouncedCartRefresh(true);
           }
         } catch(e){}
       }
@@ -1141,10 +1134,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     XMLHttpRequest.prototype.send = function(body) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
-        if (url.includes("/cart/add")) { if(window._lastCart&&window._cfConfig){renderCart(window._lastCart,window._cfConfig);}openCart(); }
         this.addEventListener('load', () => {
           setTimeout(() => {
-            debouncedCartRefresh(false);
+            debouncedCartRefresh(true);
           }, 50);
         });
       }
@@ -1159,8 +1151,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
       e.preventDefault();
       
-      if(window._lastCart&&window._cfConfig){renderCart(window._lastCart,window._cfConfig);}
-      openCart();
 
       const formData = new FormData(form);
 
@@ -1169,7 +1159,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           method: 'POST',
           body: formData
         });
-        debouncedCartRefresh(false);
+        debouncedCartRefresh(true);
       } catch(err) { console.warn('[CF] form submit error', err); }
     }, { capture: true });
 
@@ -1213,7 +1203,6 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   if (isAddToCart || isSubmit || isInProductCtx) return;
   e.preventDefault(); e.stopPropagation();
   if(window._cfConfig && window._lastCart) renderCart(window._lastCart, window._cfConfig);
-  openCart();
   const cart = await fetchShopifyCart();
   window._lastCart = cart;
   if(window._cfConfig) renderCart(cart, window._cfConfig);
