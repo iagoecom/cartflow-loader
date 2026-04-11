@@ -782,7 +782,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + k + '=' + encodeURIComponent(val);
       }
     });
-    if (bestCoupon?.shopify_coupon) checkoutUrl += `?discount=${encodeURIComponent(bestCoupon.shopify_coupon)}`;
+    if (bestCoupon?.shopify_coupon) checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + `discount=${encodeURIComponent(bestCoupon.shopify_coupon)}`;
     return checkoutUrl;
   }
 
