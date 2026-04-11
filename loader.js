@@ -772,6 +772,16 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
+        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term'];
+    var pageParams = new URLSearchParams(window.location.search);
+    var storedTracking = {};
+    try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
+    trackingKeys.forEach(function(k) {
+      var val = pageParams.get(k) || storedTracking[k] || null;
+      if (val) {
+        checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + k + '=' + encodeURIComponent(val);
+      }
+    });
     if (bestCoupon?.shopify_coupon) checkoutUrl += `?discount=${encodeURIComponent(bestCoupon.shopify_coupon)}`;
     return checkoutUrl;
   }
