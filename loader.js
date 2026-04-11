@@ -963,19 +963,39 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','_fbp','_fbc','landing_page','referrer'];
-    var pageParams = new URLSearchParams(window.location.search);
-    var storedTracking = {};
-    try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
-    trackingKeys.forEach(function(k) {
-      var val = pageParams.get(k) || storedTracking[k] || null;
-      if (val) {
-        checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'attributes[' + k + ']=' + encodeURIComponent(val);
-      }
-    });
-    checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "attributes[source]=octoroute";
-    if (bestCoupon?.shopify_coupon) checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'discount=' + encodeURIComponent(bestCoupon.shopify_coupon);
-    return checkoutUrl;
+// Captura tracking da sessão
+var trackingData = {};
+try { trackingData = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
+var pageParams = new URLSearchParams(window.location.search);
+
+// Merge: URL atual tem prioridade sobre sessão
+var allTracking = Object.assign({}, trackingData);
+pageParams.forEach((val, key) => { allTracking[key] = val; });
+
+// Atributos do pedido (salvos no pedido Shopify)
+var attributeKeys = [
+  'fbclid', 'ttclid', 'gclid',
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
+  '_fbp', '_fbc', 'landing_page', 'referrer'
+];
+attributeKeys.forEach(function(k) {
+  if (allTracking[k]) {
+    checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 
+      'attributes%5B' + k + '%5D=' + encodeURIComponent(allTracking[k]);
+  }
+});
+
+// Source sempre octoroute
+checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'attributes%5Bsource%5D=octoroute';
+
+// Desconto
+if (bestCoupon?.shopify_coupon) checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'discount=' + encodeURIComponent(bestCoupon.shopify_coupon);
+
+// fbclid e ttclid também direto na URL (para pixel capturar via browser)
+if (allTracking['fbclid']) checkoutUrl += '&fbclid=' + encodeURIComponent(allTracking['fbclid']);
+if (allTracking['ttclid']) checkoutUrl += '&ttclid=' + encodeURIComponent(allTracking['ttclid']);
+
+return checkoutUrl;
   }
 
   window.cfToggleAddon = (type) => {
