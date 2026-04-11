@@ -46,6 +46,104 @@
   let _fontScale = 1.15;
   const fs = (base) => Math.round(base * _fontScale);
 
+  // ============ SESSION ID (v4) ============
+  let _sessionId = null;
+  try {
+    _sessionId = sessionStorage.getItem('_octo_sid');
+    if (!_sessionId) {
+      _sessionId = 'sid_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+      sessionStorage.setItem('_octo_sid', _sessionId);
+    }
+  } catch(e) { _sessionId = 'sid_' + Date.now().toString(36); }
+
+  // ============ TRACKING QUEUE (v4 — sendBeacon batch) ============
+  let _trackQueue = [];
+  let _trackFlushTimer = null;
+
+  function flushTrackQueue() {
+    if (_trackQueue.length === 0) return;
+    const batch = _trackQueue.splice(0);
+    const payload = JSON.stringify({ events: batch });
+    try {
+      if (navigator.sendBeacon) {
+        const blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon(TRACK_URL, blob);
+      } else {
+        (window._cfOrigFetch || fetch)(TRACK_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: payload, keepalive: true
+        }).catch(() => {});
+      }
+    } catch(e) {}
+  }
+
+  function trackEvent(type, amount=0, metadata={}) {
+    _trackQueue.push({
+      token: TOKEN,
+      event_type: type,
+      amount,
+      session_id: _sessionId,
+      metadata
+    });
+    clearTimeout(_trackFlushTimer);
+    _trackFlushTimer = setTimeout(flushTrackQueue, 1500);
+  }
+
+  // Flush on page unload
+  try {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushTrackQueue();
+    });
+    window.addEventListener('pagehide', flushTrackQueue);
+  } catch(e) {}
+
+  // ============ CART OPEN TIME TRACKING (v4) ============
+  let _cartOpenedAt = null;
+
+  // ============ CURRENCY CONVERSION (v4) ============
+  const CURRENCY_RATES = { USD: 1, BRL: 5.481, EUR: 0.899, GBP: 0.782 };
+  const CURRENCY_SYMBOLS = { USD: '$', BRL: 'R$', EUR: '€', GBP: '£' };
+  const TZ_CURRENCY_MAP = {
+    'America/Sao_Paulo': 'BRL', 'America/Fortaleza': 'BRL', 'America/Recife': 'BRL',
+    'America/Bahia': 'BRL', 'America/Belem': 'BRL', 'America/Manaus': 'BRL',
+    'America/Cuiaba': 'BRL', 'America/Campo_Grande': 'BRL', 'America/Porto_Velho': 'BRL',
+    'America/Maceio': 'BRL', 'America/Araguaina': 'BRL', 'America/Noronha': 'BRL',
+    'Europe/London': 'GBP', 'Europe/Paris': 'EUR', 'Europe/Berlin': 'EUR',
+    'Europe/Madrid': 'EUR', 'Europe/Rome': 'EUR', 'Europe/Amsterdam': 'EUR',
+    'Europe/Brussels': 'EUR', 'Europe/Vienna': 'EUR', 'Europe/Lisbon': 'EUR',
+    'Europe/Dublin': 'EUR', 'Europe/Helsinki': 'EUR', 'Europe/Athens': 'EUR',
+  };
+  let _storeCurrency = 'USD';
+  let _visitorCurrency = 'USD';
+
+  function detectVisitorCurrency() {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz && TZ_CURRENCY_MAP[tz]) return TZ_CURRENCY_MAP[tz];
+    } catch(e) {}
+    return 'USD';
+  }
+
+  function convertPrice(cents) {
+    const dollars = cents / 100;
+    if (_storeCurrency === _visitorCurrency) return dollars;
+    const rateFrom = CURRENCY_RATES[_storeCurrency] || 1;
+    const rateTo = CURRENCY_RATES[_visitorCurrency] || 1;
+    return Math.round(dollars / rateFrom * rateTo * 100) / 100;
+  }
+
+  function formatPrice(dollars) {
+    const sym = CURRENCY_SYMBOLS[_visitorCurrency] || '$';
+    if (_visitorCurrency === 'BRL') {
+      return sym + dollars.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return sym + Number(dollars).toFixed(2);
+  }
+
+  function formatPriceCents(cents) {
+    return formatPrice(convertPrice(cents));
+  }
+
   function onCartReady() {
     _cartReady = true;
     if (_pendingOpen) {
@@ -61,7 +159,7 @@
     }
   }
 
-  function formatPriceDollars(val) { return '$' + Number(val).toFixed(2); }
+  function formatPriceDollars(val) { return formatPrice(Number(val)); }
 
   function contrastText(hex) {
     if (!hex || hex.length < 7) return '#000000';
@@ -115,25 +213,84 @@
     protected_support: 'Protected purchase + 24/7 support',
   };
 
-async function getConfig(skus) {
-    const cacheKey = `cf_config_${TOKEN}`;
+  // ============ CONFIG CACHE WITH LOCALSTORAGE (v4 — 5min TTL) ============
+  const CONFIG_CACHE_KEY = `cf_config_${TOKEN}`;
+  const CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+  function getCachedConfig() {
     try {
-      const cached = sessionStorage.getItem(cacheKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        _spActive = parsed.visual?.sp_pre_checked || false;
-        _gwActive = parsed.visual?.gw_pre_checked || false;
+      const raw = localStorage.getItem(CONFIG_CACHE_KEY);
+      if (!raw) return null;
+      const { data, ts } = JSON.parse(raw);
+      if (Date.now() - ts < CONFIG_CACHE_TTL) return data;
+      return data; // stale but usable for stale-while-revalidate
+    } catch(e) { return null; }
+  }
+
+  function setCachedConfig(data) {
+    try {
+      localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+    } catch(e) {}
+  }
+
+  function isCacheFresh() {
+    try {
+      const raw = localStorage.getItem(CONFIG_CACHE_KEY);
+      if (!raw) return false;
+      const { ts } = JSON.parse(raw);
+      return Date.now() - ts < CONFIG_CACHE_TTL;
+    } catch(e) { return false; }
+  }
+
+async function getConfig(skus) {
+    // Try localStorage first (persistent across page loads)
+    const cached = getCachedConfig();
+    if (cached) {
+      _spActive = cached.visual?.sp_pre_checked || false;
+      _gwActive = cached.visual?.gw_pre_checked || false;
+      _storeCurrency = cached.visual?.store_currency || 'USD';
+      // Background refresh if stale
+      if (!isCacheFresh()) {
         fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
           .then(r => r.ok ? r.json() : null)
-          .then(fresh => { if (fresh) { sessionStorage.setItem(cacheKey, JSON.stringify(fresh)); window._cfConfig = fresh; _spActive = fresh.visual?.sp_pre_checked || false; _gwActive = fresh.visual?.gw_pre_checked || false; } }).catch(()=>{});
+          .then(fresh => {
+            if (fresh) {
+              setCachedConfig(fresh);
+              sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh));
+              window._cfConfig = fresh;
+              _spActive = fresh.visual?.sp_pre_checked || false;
+              _gwActive = fresh.visual?.gw_pre_checked || false;
+              _storeCurrency = fresh.visual?.store_currency || 'USD';
+            }
+          }).catch(()=>{});
+      }
+      return cached;
+    }
+    // Also check sessionStorage (original behavior)
+    try {
+      const sessionCached = sessionStorage.getItem(`cf_config_${TOKEN}`);
+      if (sessionCached) {
+        const parsed = JSON.parse(sessionCached);
+        _spActive = parsed.visual?.sp_pre_checked || false;
+        _gwActive = parsed.visual?.gw_pre_checked || false;
+        _storeCurrency = parsed.visual?.store_currency || 'USD';
+        setCachedConfig(parsed);
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(fresh => { if (fresh) { setCachedConfig(fresh); sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh)); window._cfConfig = fresh; _spActive = fresh.visual?.sp_pre_checked || false; _gwActive = fresh.visual?.gw_pre_checked || false; _storeCurrency = fresh.visual?.store_currency || 'USD'; } }).catch(()=>{});
         return parsed;
       }
+    } catch(e) {}
+    // Fresh fetch
+    try {
       const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`);
       if (!r.ok) return null;
       const data = await r.json();
-      sessionStorage.setItem(cacheKey, JSON.stringify(data));
+      setCachedConfig(data);
+      sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(data));
       _spActive = data.visual?.sp_pre_checked || false;
       _gwActive = data.visual?.gw_pre_checked || false;
+      _storeCurrency = data.visual?.store_currency || 'USD';
       return data;
     } catch(e) { return null; }
   }
@@ -179,10 +336,6 @@ async function getConfig(skus) {
       const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`);
       if (r.ok) { const data = await r.json(); if (window._cfConfig) window._cfConfig.upsells = data.upsells || []; }
     } catch(e) {}
-  }
-
-  function trackEvent(type, amount=0, metadata={}) {
-    (window._cfOrigFetch || fetch)(TRACK_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:TOKEN, event_type:type, amount, metadata }) }).catch(()=>{});
   }
 
   async function fetchShopifyCart() { return (await (window._cfOrigFetch || fetch)('/cart.js')).json(); }
@@ -245,11 +398,16 @@ async function getConfig(skus) {
     const dw = getDrawerWidth(v);
     const mw = v.cart_width_mobile === 'default' ? '90vw' : '100vw';
     const footerBg = v.accent_color || '#f6f6f7';
+    // Overlay with configurable backdrop blur (v4)
+    const overlayColor = v.overlay_color || 'rgba(0,0,0,0.5)';
+    const overlayBlur = v.overlay_blur != null ? v.overlay_blur : 4;
+    const overlayEnabled = v.overlay_enabled !== false;
+    const backdropFilter = overlayEnabled && overlayBlur > 0 ? `backdrop-filter:blur(${overlayBlur}px);-webkit-backdrop-filter:blur(${overlayBlur}px);` : '';
     const style = document.createElement('style');
     style.id = 'cartflow-styles';
     style.textContent = `
-      #cf-overlay { display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999998; }
-      #cf-overlay.open { display:block; }
+      #cf-overlay { display:none;position:fixed;inset:0;background:${overlayEnabled ? overlayColor : 'rgba(0,0,0,0.5)'};${backdropFilter}z-index:999998;transition:opacity 0.3s ease;opacity:0; }
+      #cf-overlay.open { display:block;opacity:1; }
       #cf-drawer {
         position:fixed;top:0;right:-${dw};width:${dw};max-width:100vw;height:100%;
         background:${v.bg_color||'#FFFFFF'};color:${v.text_color||'#000000'};
@@ -366,14 +524,24 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   }
 
   function openCart() {
-    document.getElementById('cf-overlay')?.classList.add('open');
-    document.getElementById('cf-drawer')?.classList.add('open');
+    const overlay = document.getElementById('cf-overlay');
+    const drawer = document.getElementById('cf-drawer');
+    if (overlay) { overlay.style.display = 'block'; requestAnimationFrame(() => { overlay.classList.add('open'); }); }
+    if (drawer) drawer.classList.add('open');
     document.body.style.overflow = 'hidden';
+    _cartOpenedAt = Date.now();
+    trackEvent('cart_opened');
   }
   function closeCart() {
     document.getElementById('cf-overlay')?.classList.remove('open');
     document.getElementById('cf-drawer')?.classList.remove('open');
     document.body.style.overflow = '';
+    // Track time in cart
+    if (_cartOpenedAt) {
+      const seconds = Math.round((Date.now() - _cartOpenedAt) / 1000);
+      trackEvent('cart_closed', 0, { time_in_cart_seconds: seconds });
+      _cartOpenedAt = null;
+    }
   }
 
   function buildUpsellVariantHtml(product, v) {
@@ -499,7 +667,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           }
         }
         const nextT = sorted.find(t => (parseFloat(t.minimum_value)||0) > simValue);
-        const rem = nextT ? (isQty ? `${(parseFloat(nextT.minimum_value)||0) - simValue}` : `$${((parseFloat(nextT.minimum_value)||0) - simValue).toFixed(0)}`) : null;
+        const rem = nextT ? (isQty ? `${(parseFloat(nextT.minimum_value)||0) - simValue}` : `${formatPriceDollars((parseFloat(nextT.minimum_value)||0) - simValue)}`) : null;
         let rawText = '';
         if (!nextT) {
           rawText = (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
@@ -644,6 +812,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if (btmEl) btmEl.innerHTML = '';
     }
     if (v.upsells_enabled && visibleUpsells.length > 0 && upsellsChanged) {
+      // Track upsell views (v4)
+      visibleUpsells.forEach(p => trackEvent('upsell_viewed', p.price||0, { title: p.title, sku: p.sku }));
       const upsellBg = accentColor;
       const upsellText = accentTextColor;
       const isStack = (v.upsells_direction||'stack') !== 'inline';
@@ -804,8 +974,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   }
 
   window.cfToggleAddon = (type) => {
-    if (type === 'sp') _spActive = !_spActive;
-    if (type === 'gw') _gwActive = !_gwActive;
+    if (type === 'sp') { _spActive = !_spActive; trackEvent('addon_toggled', 0, { addon: 'shipping_protection', active: _spActive }); }
+    if (type === 'gw') { _gwActive = !_gwActive; trackEvent('addon_toggled', 0, { addon: 'gift_wrap', active: _gwActive }); }
     fetchShopifyCart().then(cart => { if (window._cfConfig) renderCart(cart, window._cfConfig); });
   };
 
@@ -832,17 +1002,14 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     let selectedSku = wrapper?.getAttribute('data-cf-selected-sku') || '';
     if (!selectedSku || selectedSku === 'null') selectedSku = product.variants?.[0]?.sku || product.sku || '';
     if (!selectedSku) { _upsellPending = false; resetBtn(); return; }
-    // Resolve variant ID: prefer server-provided shopify_variant_id, fallback to storefront lookup
     const selectedVariant = (product.variants || []).find(v => v.sku === selectedSku);
     let vitrineVariantId = selectedVariant?.shopify_variant_id || null;
     if (!vitrineVariantId) {
-      // Fallback: lookup from storefront /products.json
       const vitrineMap = await getVitrineSkuMap();
       const vitrineEntry = vitrineMap[selectedSku.toUpperCase()];
       vitrineVariantId = vitrineEntry?.id || vitrineEntry;
     }
     if (!vitrineVariantId) { console.warn('[CartFlow] SKU não encontrado na vitrine:', selectedSku); _upsellPending = false; resetBtn(); return; }
-    // Track this SKU as an upsell addition
     _addedUpsellSkus.add(selectedSku);
     try {
       const res = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
@@ -866,7 +1033,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
   window.closeCart = closeCart;
 
-  // Debounced cart refresh — groups rapid add/change calls (bundles, etc.)
+  // Debounced cart refresh — reduced to 100ms for faster response (v4)
   function debouncedCartRefresh(openAfter) {
     clearTimeout(_refreshTimer);
     _refreshTimer = setTimeout(async () => {
@@ -880,11 +1047,10 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           if (openAfter) openCart();
         } else if (openAfter) { _pendingOpen = true; }
       } catch(e) {}
-    }, 300);
+    }, 100);
   }
 
   function interceptCart() {
-    // Guard: prevent double-patching if script loads twice
     if (window._cfFetchPatched) return;
     window._cfFetchPatched = true;
 
@@ -913,7 +1079,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
         this.addEventListener('load', () => {
-          // Small delay to let Shopify persist the change before we read /cart.js
           setTimeout(() => {
             debouncedCartRefresh(url.includes('/cart/add'));
           }, 50);
@@ -928,7 +1093,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const action = form.action || '';
       if (!action.includes('/cart/add')) return;
 
-      // Prevent page redirect (native /cart/add returns HTML redirect)
       e.preventDefault();
 
       const formData = new FormData(form);
@@ -952,11 +1116,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         btn.disabled = true;
         const origHtml = btn.innerHTML;
         btn.innerHTML = `${SVG_ICONS.spin} SECURE CHECKOUT`;
+        trackEvent('checkout_clicked');
         try {
           const cart = _upsellPending ? await fetchShopifyCart() : (window._lastCart || await fetchShopifyCart());
           window._lastCart = cart;
           const url = await buildCheckoutUrl(cart.items, window._cfConfig);
           trackEvent('checkout', cart.total_price/100);
+          flushTrackQueue();
           window.location.href = url || '/checkout';
        } catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
         finally { setTimeout(() => { btn.disabled=false; btn.innerHTML=origHtml; }, 3000); }
@@ -991,6 +1157,10 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
 
   try {
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
+
+    // Detect visitor currency (v4)
+    _visitorCurrency = detectVisitorCurrency();
+
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
@@ -998,6 +1168,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     getVitrineSkuMap();
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
+    _storeCurrency = config.visual?.store_currency || 'USD';
     _fontScale = SCALE_MAP[config.visual?.font_scale] || 1.15;
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
@@ -1007,7 +1178,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     renderCart(initialCart, config);
     onCartReady();
     trackEvent('cart_impression');
-    console.log('[CartFlow] ✓ Loaded');
+    console.log('[CartFlow] ✓ Loaded v4');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
