@@ -457,8 +457,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         justify-content: center;
         box-sizing: border-box !important;
       }
-    #cf-drawer .cf-loading-spinner { display:flex; justify-content:center; align-items:center; padding:40px 0; }
-    #cf-drawer .cf-loading-spinner::after { content:""; width:32px; height:32px; border:3px solid rgba(0,0,0,0.1); border-top-color:#333; border-radius:50%; animation:cf-spin 0.6s linear infinite; }
       @keyframes cf-spin { to { transform: rotate(360deg); } }
       @media (max-width:480px) { #cf-drawer { width:${mw};right:-${mw}; } }
     `;
@@ -527,41 +525,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     }
   }
 
-  function renderOptimisticItem(data) {
-    const body = document.getElementById('cf-items');
-    if (!body) return;
-    // data can be a single item {id, title, image, price, quantity} or {items: [...]}
-    const items = data.items ? data.items : [data];
-    if (!items.length || !items[0].title) return;
-    const v = window._cfConfig?.visual || {};
-    const textColor = v.text_color || '#333';
-    let html = '';
-    for (const item of items) {
-      const img = item.image || item.featured_image?.url || '';
-      const title = item.title || item.product_title || '';
-      const price = item.price ? formatPriceCents(item.price) : '';
-      const qty = item.quantity || 1;
-      const variant = item.variant_title && item.variant_title !== 'Default Title' ? item.variant_title : '';
-      html += `<div style="display:flex;gap:12px;padding:12px 16px;align-items:center;opacity:0.85;animation:cfFadeIn .3s ease forwards;">
-        ${img ? `<img src="${img}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;" />` : ''}
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:${fs(14)}px;font-weight:500;color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
-          ${variant ? `<div style="font-size:${fs(12)}px;color:${textColor};opacity:0.6;margin-top:2px;">${variant}</div>` : ''}
-          <div style="font-size:${fs(13)}px;color:${textColor};margin-top:4px;">Qty: ${qty} · ${price}</div>
-        </div>
-      </div>`;
-    }
-    // Add a subtle loading indicator below the item
-    html += '<div style="display:flex;justify-content:center;padding:8px 0;"><div class="cf-loading-spinner" style="width:20px;height:20px;border-width:2px;"></div></div>';
-    body.innerHTML = html;
-    body.classList.remove('cf-empty');
-  }
-
-  function showLoadingState() {
-    const body = document.getElementById('cf-items');
-    if (body) body.innerHTML = '<div class="cf-loading-spinner"></div>';
-  }
-
   function openCart() {
     const overlay = document.getElementById('cf-overlay');
     const drawer = document.getElementById('cf-drawer');
@@ -578,11 +541,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     // Reset checkout button state
     const ckBtn = document.getElementById('cf-checkout');
     if (ckBtn) { const btnText = window._cfConfig?.visual?.checkout_button_text || 'Secure Checkout'; ckBtn.disabled = false; ckBtn.innerHTML = `${SVG_ICONS.lock} ${btnText}`; }
-    const overlay = document.getElementById('cf-overlay');
-    if (overlay) {
-      overlay.classList.remove('open');
-      setTimeout(() => { if (!overlay.classList.contains('open')) overlay.style.display = 'none'; }, 350);
-    }
+    document.getElementById('cf-overlay')?.classList.remove('open');
     document.getElementById('cf-drawer')?.classList.remove('open');
     document.body.style.overflow = '';
     // Track time in cart
@@ -1101,7 +1060,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           if (openAfter) openCart();
         } else if (openAfter) { _pendingOpen = true; }
       } catch(e) {}
-    }, 0);
+    }, 100);
   }
 
   function interceptCart() {
@@ -1111,21 +1070,12 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
-      // Optimistic UI: open drawer immediately on add-to-cart
-      if (url.includes('/cart/add') && !url.includes('_cf=1') && !url.includes('track-event') && !url.includes('config')) {
-        showLoadingState();
-        openCart();
-      }
       const result = await window._cfOrigFetch.apply(window, args);
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
         try {
           const clone = await result.clone().json();
-          // Optimistic render: show added item immediately
-          if (url.includes('/cart/add') && clone) {
-            renderOptimisticItem(clone);
-          }
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
-            debouncedCartRefresh(false);
+            debouncedCartRefresh(url.includes('/cart/add'));
           }
         } catch(e){}
       }
@@ -1141,10 +1091,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     XMLHttpRequest.prototype.send = function(body) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
-        if (url.includes('/cart/add')) { showLoadingState(); openCart(); }
         this.addEventListener('load', () => {
           setTimeout(() => {
-            debouncedCartRefresh(false);
+            debouncedCartRefresh(url.includes('/cart/add'));
           }, 50);
         });
       }
@@ -1158,18 +1107,15 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if (!action.includes('/cart/add')) return;
 
       e.preventDefault();
-      showLoadingState();
-      openCart();
 
       const formData = new FormData(form);
 
       try {
-        const formRes = await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+        await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
           method: 'POST',
           body: formData
         });
-        try { const added = await formRes.clone().json(); if (added) renderOptimisticItem(added); } catch(e){}
-        debouncedCartRefresh(false);
+        debouncedCartRefresh(true);
       } catch(err) { console.warn('[CF] form submit error', err); }
     }, { capture: true });
 
