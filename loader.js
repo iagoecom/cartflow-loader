@@ -1190,7 +1190,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const url = await buildCheckoutUrl(cart.items, window._cfConfig);
           trackEvent('checkout', cart.total_price/100);
           flushTrackQueue();
-          window.location.replace(url || '/checkout');
+          window.location.href = url || '/checkout';
        } catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
         return;
       }
