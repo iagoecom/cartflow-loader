@@ -457,6 +457,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         justify-content: center;
         box-sizing: border-box !important;
       }
+    #cf-drawer .cf-loading-spinner { display:flex; justify-content:center; align-items:center; padding:40px 0; }
+    #cf-drawer .cf-loading-spinner::after { content:""; width:32px; height:32px; border:3px solid rgba(0,0,0,0.1); border-top-color:#333; border-radius:50%; animation:cf-spin 0.6s linear infinite; }
       @keyframes cf-spin { to { transform: rotate(360deg); } }
       @media (max-width:480px) { #cf-drawer { width:${mw};right:-${mw}; } }
     `;
@@ -523,6 +525,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       ckBtn.onmouseenter = () => { if (v.button_hover_color) ckBtn.style.setProperty('background', v.button_hover_color, 'important'); else ckBtn.style.setProperty('opacity', '0.85', 'important'); };
       ckBtn.onmouseleave = () => { ckBtn.style.setProperty('background', v.button_color||'#000', 'important'); ckBtn.style.setProperty('opacity', '1', 'important'); };
     }
+  }
+
+  function showLoadingState() {
+    const body = document.getElementById('cf-items');
+    if (body) body.innerHTML = '<div class="cf-loading-spinner"></div>';
   }
 
   function openCart() {
@@ -1060,7 +1067,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           if (openAfter) openCart();
         } else if (openAfter) { _pendingOpen = true; }
       } catch(e) {}
-    }, 100);
+    }, 0);
   }
 
   function interceptCart() {
@@ -1070,12 +1077,17 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
+      // Optimistic UI: open drawer immediately on add-to-cart
+      if (url.includes('/cart/add') && !url.includes('_cf=1') && !url.includes('track-event') && !url.includes('config')) {
+        showLoadingState();
+        openCart();
+      }
       const result = await window._cfOrigFetch.apply(window, args);
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
         try {
           const clone = await result.clone().json();
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
-            debouncedCartRefresh(url.includes('/cart/add'));
+            debouncedCartRefresh(false);
           }
         } catch(e){}
       }
@@ -1091,9 +1103,10 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     XMLHttpRequest.prototype.send = function(body) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
+        if (url.includes('/cart/add')) { showLoadingState(); openCart(); }
         this.addEventListener('load', () => {
           setTimeout(() => {
-            debouncedCartRefresh(url.includes('/cart/add'));
+            debouncedCartRefresh(false);
           }, 50);
         });
       }
@@ -1107,6 +1120,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if (!action.includes('/cart/add')) return;
 
       e.preventDefault();
+      showLoadingState();
+      openCart();
 
       const formData = new FormData(form);
 
@@ -1115,7 +1130,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           method: 'POST',
           body: formData
         });
-        debouncedCartRefresh(true);
+        debouncedCartRefresh(false);
       } catch(err) { console.warn('[CF] form submit error', err); }
     }, { capture: true });
 
@@ -1137,8 +1152,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           trackEvent('checkout', cart.total_price/100);
           flushTrackQueue();
           window.location.replace(url || '/checkout');
-} catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
-       finally { setTimeout(() => { btn.disabled=false; btn.innerHTML=origHtml; }, 3000); }
+       } catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
         return;
       }
       const triggers = [
