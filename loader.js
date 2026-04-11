@@ -1115,7 +1115,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const url = String(args[0]||'');
       // Optimistic UI: open drawer immediately on add-to-cart
       if (url.includes('/cart/add') && !url.includes('_cf=1') && !url.includes('track-event') && !url.includes('config')) {
-        showLoadingState();
+        
         openCart();
       }
       const result = await window._cfOrigFetch.apply(window, args);
@@ -1123,9 +1123,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         try {
           const clone = await result.clone().json();
           // Optimistic render: show added item immediately
-          if (url.includes('/cart/add') && clone) {
-            renderOptimisticItem(clone);
-          }
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
             debouncedCartRefresh(false);
           }
@@ -1143,7 +1140,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     XMLHttpRequest.prototype.send = function(body) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
-        if (url.includes('/cart/add')) { showLoadingState(); openCart(); }
+        if (url.includes("/cart/add")) { openCart(); }
         this.addEventListener('load', () => {
           setTimeout(() => {
             debouncedCartRefresh(false);
@@ -1160,7 +1157,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if (!action.includes('/cart/add')) return;
 
       e.preventDefault();
-      showLoadingState();
+      
       openCart();
 
       const formData = new FormData(form);
@@ -1170,7 +1167,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           method: 'POST',
           body: formData
         });
-        try { const added = await formRes.clone().json(); if (added) renderOptimisticItem(added); } catch(e){}
         debouncedCartRefresh(false);
       } catch(err) { console.warn('[CF] form submit error', err); }
     }, { capture: true });
