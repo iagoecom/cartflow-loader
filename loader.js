@@ -12,6 +12,8 @@
     if(fbp)t['_fbp']=decodeURIComponent(fbp);
     if(fbc)t['_fbc']=decodeURIComponent(fbc);
     if(t.fbclid&&!t['_fbc'])t['_fbc']='fb.1.'+Date.now()+'.'+t.fbclid;
+    t['landing_page']=t['landing_page']||window.location.pathname;
+    t['referrer']=t['referrer']||document.referrer||'';
     try{sessionStorage.setItem('_octo_tracking',JSON.stringify(t))}catch(e){}
   })();
 
@@ -526,6 +528,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   function openCart() {
     const overlay = document.getElementById('cf-overlay');
     const drawer = document.getElementById('cf-drawer');
+    // Reset checkout button state
+    const ckBtn = document.getElementById('cf-checkout');
+    if (ckBtn) { const btnText = window._cfConfig?.visual?.checkout_button_text || 'Secure Checkout'; ckBtn.disabled = false; ckBtn.innerHTML = `${SVG_ICONS.lock} ${btnText}`; }
     if (overlay) { overlay.style.display = 'block'; requestAnimationFrame(() => { overlay.classList.add('open'); }); }
     if (drawer) drawer.classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -958,7 +963,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','_fbp','_fbc'];
+        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','_fbp','_fbc','landing_page','referrer'];
     var pageParams = new URLSearchParams(window.location.search);
     var storedTracking = {};
     try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
@@ -1123,9 +1128,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const url = await buildCheckoutUrl(cart.items, window._cfConfig);
           trackEvent('checkout', cart.total_price/100);
           flushTrackQueue();
-          window.location.href = url || '/checkout';
+          window.location.replace(url || '/checkout');
        } catch(e) { btn.disabled=false; btn.innerHTML=origHtml; }
-        finally { setTimeout(() => { btn.disabled=false; btn.innerHTML=origHtml; }, 3000); }
         return;
       }
       const triggers = [
