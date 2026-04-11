@@ -538,6 +538,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     trackEvent('cart_opened');
   }
   function closeCart() {
+    // Reset checkout button state
+    const ckBtn = document.getElementById('cf-checkout');
+    if (ckBtn) { const btnText = window._cfConfig?.visual?.checkout_button_text || 'Secure Checkout'; ckBtn.disabled = false; ckBtn.innerHTML = `${SVG_ICONS.lock} ${btnText}`; }
     document.getElementById('cf-overlay')?.classList.remove('open');
     document.getElementById('cf-drawer')?.classList.remove('open');
     document.body.style.overflow = '';
@@ -975,6 +978,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     });
     checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "attributes[source]=octoroute";
     if (bestCoupon?.shopify_coupon) checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'discount=' + encodeURIComponent(bestCoupon.shopify_coupon);
+    // Top-level params for pixel compatibility
+    var _allT = Object.assign({}, storedTracking);
+    try { new URLSearchParams(window.location.search).forEach(function(v,k){ _allT[k]=v; }); } catch(e){}
+    if (_allT.fbclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "fbclid=" + encodeURIComponent(_allT.fbclid);
+    if (_allT.ttclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "ttclid=" + encodeURIComponent(_allT.ttclid);
     return checkoutUrl;
   }
 
@@ -1113,7 +1121,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
     document.addEventListener('click', async (e) => {
       const t = e.target;
-      if (t.id==='cf-close'||t.closest('#cf-close')||t.id==='cf-overlay') { closeCart(); return; }
+      if (t.id==='cf-close'||t.closest('#cf-close')) { closeCart(); return; }
       if (t.id==='cf-checkout'||t.closest('#cf-checkout')) {
         e.preventDefault();
         const btn = document.getElementById('cf-checkout');
