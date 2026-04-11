@@ -1116,7 +1116,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       // Optimistic UI: open drawer immediately on add-to-cart
       if (url.includes('/cart/add') && !url.includes('_cf=1') && !url.includes('track-event') && !url.includes('config')) {
         
-        openCart();
+        if(window._lastCart && window._cfConfig){renderCart(window._lastCart,window._cfConfig);}
+      openCart();
       }
       const result = await window._cfOrigFetch.apply(window, args);
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
@@ -1140,7 +1141,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     XMLHttpRequest.prototype.send = function(body) {
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
-        if (url.includes("/cart/add")) { openCart(); }
+        if (url.includes("/cart/add")) { if(window._lastCart&&window._cfConfig){renderCart(window._lastCart,window._cfConfig);}openCart(); }
         this.addEventListener('load', () => {
           setTimeout(() => {
             debouncedCartRefresh(false);
@@ -1158,6 +1159,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
       e.preventDefault();
       
+      if(window._lastCart&&window._cfConfig){renderCart(window._lastCart,window._cfConfig);}
       openCart();
 
       const formData = new FormData(form);
