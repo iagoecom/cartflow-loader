@@ -1,21 +1,5 @@
 (async () => {
 
-  // — Tracking capture (persist across navigation) —
-  (function(){
-    var keys=['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term'];
-    var p=new URLSearchParams(window.location.search);
-    var t={};
-    try{t=JSON.parse(sessionStorage.getItem('_octo_tracking')||'{}')}catch(e){}
-    keys.forEach(function(k){var v=p.get(k);if(v)t[k]=v});
-    var fbp=(document.cookie.match(/(?:^|; )_fbp=([^;]*)/)||[])[1];
-    var fbc=(document.cookie.match(/(?:^|; )_fbc=([^;]*)/)||[])[1];
-    if(fbp)t['_fbp']=decodeURIComponent(fbp);
-    if(fbc)t['_fbc']=decodeURIComponent(fbc);
-    if(t.fbclid&&!t['_fbc'])t['_fbc']='fb.1.'+Date.now()+'.'+t.fbclid;
-    try{sessionStorage.setItem('_octo_tracking',JSON.stringify(t))}catch(e){}
-  })();
-
-
   const SCRIPT_TAG = document.currentScript;
   const TOKEN = SCRIPT_TAG?.getAttribute('data-token');
   const API_URL = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/config';
@@ -788,17 +772,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','_fbp','_fbc'];
-    var pageParams = new URLSearchParams(window.location.search);
-    var storedTracking = {};
-    try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
-    trackingKeys.forEach(function(k) {
-      var val = pageParams.get(k) || storedTracking[k] || null;
-      if (val) {
-checkoutUrl += ... + 'attributes[' + k + ']=' + encodeURIComponent(val);
-      }
-    });
-    if (bestCoupon?.shopify_coupon) checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'discount=' + encodeURIComponent(bestCoupon.shopify_coupon);
+    if (bestCoupon?.shopify_coupon) checkoutUrl += `?discount=${encodeURIComponent(bestCoupon.shopify_coupon)}`;
     return checkoutUrl;
   }
 
