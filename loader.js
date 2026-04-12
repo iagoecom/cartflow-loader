@@ -1033,7 +1033,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const skuMap = routing.sku_map || {};
     const activeDomain = routing.active_store?.domain;
     const v = config?.visual || {};
-    if (!activeDomain) return '/checkout';
+    if (!activeDomain) return "/checkout";
     const lineItems = [];
     for (const item of cartItems) {
       const mappedId = skuMap[item.sku];
@@ -1041,56 +1041,48 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     }
     if (_spActive && v.sp_sku) { const m = skuMap[v.sp_sku]; if (m) lineItems.push(`${m}:1`); }
     if (_gwActive && v.gw_sku) { const m = skuMap[v.gw_sku]; if (m) lineItems.push(`${m}:1`); }
-    if (lineItems.length === 0) return '/checkout';
-    let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(',')}`;
+    if (lineItems.length === 0) return "/checkout";
+    let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(",")}`;
     const tiers = config.rewards || [];
-    const isQty = (v.rewards_calculation||'cart_total') === 'quantity';
+    const isQty = (v.rewards_calculation||"cart_total") === "quantity";
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','wbraid','gbraid','tikclid','irclickid','_fbp','_fbc','ttp'];
-    // Triple-layer read: localStorage -> cookie -> sessionStorage
+    var trackingKeys = ["fbclid","ttclid","gclid","utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","wbraid","gbraid","tikclid","irclickid","_fbp","_fbc","ttp"];
     var storedTracking = {};
-    try { storedTracking = JSON.parse(localStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
+    try { storedTracking = JSON.parse(localStorage.getItem("_octo_tracking") || "{}"); } catch(e) {}
     if (!Object.keys(storedTracking).length) {
       try { var ck = (document.cookie.match(/(?:^|; )_octo_tracking=([^;]*)/)||[])[1]; if(ck) storedTracking = JSON.parse(decodeURIComponent(ck)); } catch(e) {}
     }
     if (!Object.keys(storedTracking).length) {
-      try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
+      try { storedTracking = JSON.parse(sessionStorage.getItem("_octo_tracking") || "{}"); } catch(e) {}
     }
-    // Live URL merge: fresh params override stored values (like HeroCart)
     var pageParams = new URLSearchParams(window.location.search);
     var mergedTracking = Object.assign({}, storedTracking);
     pageParams.forEach(function(v, k) { if (v) mergedTracking[k] = v; });
+    /* --- SERVER-SIDE ATTRIBUTION --- */
+    var cleanTracking = {};
     trackingKeys.forEach(function(k) {
       var val = mergedTracking[k] || null;
-      if (val) {
-        checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'attributes[' + k + ']=' + encodeURIComponent(String(val).substring(0, 200));
-      }
+      if (val) cleanTracking[k] = String(val).substring(0, 200);
     });
-    checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "attributes[source]=octoroute";
-    if (bestCoupon?.shopify_coupon) checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'discount=' + encodeURIComponent(bestCoupon.shopify_coupon);
-    // Top-level params for pixel compatibility
-    if (mergedTracking.fbclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "fbclid=" + encodeURIComponent(mergedTracking.fbclid);
-    if (mergedTracking.ttclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "ttclid=" + encodeURIComponent(mergedTracking.ttclid);
-    // Pre-checkout: POST /cart/update.js to persist attributes in Shopify session (like HeroCart)
-    var attrPayload = {};
-    trackingKeys.forEach(function(k) {
-      var val = mergedTracking[k] || null;
-      if (val) attrPayload[k] = String(val).substring(0, 200);
-    });
-    attrPayload['source'] = 'octoroute';
+    cleanTracking["source"] = "octoroute";
+    var sid = "ocs_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
     try {
       await Promise.race([
-        fetch('/cart/update.js', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ attributes: attrPayload })
+        fetch("https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/store-checkout-attributes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sid, store_id: config.store_id, tracking_data: cleanTracking })
         }),
-        new Promise(function(_, reject) { setTimeout(function() { reject('timeout'); }, 1500); })
+        new Promise(function(_, reject) { setTimeout(function() { reject("timeout"); }, 2000); })
       ]);
-    } catch(e) { /* timeout or error — proceed to checkout anyway */ }
-
+    } catch(e) { /* timeout or error — proceed anyway */ }
+    checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "attributes[_octo_sid]=" + encodeURIComponent(sid);
+    checkoutUrl += "&attributes[source]=octoroute";
+    if (bestCoupon?.shopify_coupon) checkoutUrl += "&discount=" + encodeURIComponent(bestCoupon.shopify_coupon);
+    if (mergedTracking.fbclid) checkoutUrl += "&fbclid=" + encodeURIComponent(mergedTracking.fbclid);
+    if (mergedTracking.ttclid) checkoutUrl += "&ttclid=" + encodeURIComponent(mergedTracking.ttclid);
     return checkoutUrl;
   }
 
