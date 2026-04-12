@@ -1073,13 +1073,18 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         fetch("https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/store-checkout-attributes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sid, store_id: config.store_id, tracking_data: cleanTracking })
+          body: JSON.stringify({ session_id: sid, store_id: config.store.id, tracking_data: cleanTracking })
         }),
         new Promise(function(_, reject) { setTimeout(function() { reject("timeout"); }, 2000); })
       ]);
     } catch(e) { /* timeout or error — proceed anyway */ }
-    checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "attributes[_octo_sid]=" + encodeURIComponent(sid);
-    checkoutUrl += "&attributes[source]=octoroute";
+    /* --- HYBRID: pass ALL tracking attributes directly in URL (like HeroCart) --- */
+    var sep = checkoutUrl.includes("?") ? "&" : "?";
+    for (var [ak, av] of Object.entries(cleanTracking)) {
+      checkoutUrl += sep + "attributes[" + encodeURIComponent(ak) + "]=" + encodeURIComponent(av);
+      sep = "&";
+    }
+    checkoutUrl += sep + "attributes[_octo_sid]=" + encodeURIComponent(sid);
     if (bestCoupon?.shopify_coupon) checkoutUrl += "&discount=" + encodeURIComponent(bestCoupon.shopify_coupon);
     if (mergedTracking.fbclid) checkoutUrl += "&fbclid=" + encodeURIComponent(mergedTracking.fbclid);
     if (mergedTracking.ttclid) checkoutUrl += "&ttclid=" + encodeURIComponent(mergedTracking.ttclid);
