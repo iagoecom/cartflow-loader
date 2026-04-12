@@ -374,7 +374,7 @@ async function getConfig(skus) {
       .map(i => i.sku)
       .filter(s => s && !_addedUpsellSkus.has(s))
       .join(',');
-    if (!skus) { if (window._cfConfig) window._cfConfig.upsells = []; _lastSkus = ''; return; }
+    if (!skus) { _lastSkus = ''; return; }
     if (skus === _lastSkus) return;
     _lastSkus = skus;
     try {
@@ -634,6 +634,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       trackEvent('cart_closed', 0, { time_in_cart_seconds: seconds });
       _cartOpenedAt = null;
     }
+    // Reset upsell tracking so they reappear on next open
+    _addedUpsellSkus.clear();
+    _lastSkus = '';
   }
 
   function buildUpsellVariantHtml(product, v) {
@@ -1156,12 +1159,20 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     clearTimeout(_refreshTimer);
     _refreshTimer = setTimeout(async () => {
       try {
+        // Optimistic: open immediately with cached data
+        if (openAfter && _cartReady && window._cfConfig && window._lastCart) {
+          renderCart(window._lastCart, window._cfConfig);
+          openCart();
+        }
+        // Background: fetch fresh data and re-render
         let cart = await fetchShopifyCart();
         window._lastCart = cart;
         if (_cartReady && window._cfConfig) {
           await fetchUpsells(cart);
           renderCart(cart, window._cfConfig);
-          if (openAfter) openCart();
+          if (openAfter && !document.getElementById('cf-overlay')?.classList.contains('open')) {
+            openCart();
+          }
         } else if (openAfter) { _pendingOpen = true; }
       } catch(e) {}
     }, 0);
@@ -1264,10 +1275,19 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   const isInProductCtx = triggerEl.closest('[data-section-type="product"], .product-form, product-info, form[action*="/cart/add"]');
   if (isAddToCart || isSubmit || isInProductCtx) return;
   e.preventDefault(); e.stopPropagation();
-  if(window._cfConfig && window._lastCart) renderCart(window._lastCart, window._cfConfig);
+  // Optimistic: open immediately with cache
+  if(window._cfConfig && window._lastCart) {
+    renderCart(window._lastCart, window._cfConfig);
+    openCart();
+  }
+  // Background: refresh data
   const cart = await fetchShopifyCart();
   window._lastCart = cart;
-  if(window._cfConfig) renderCart(cart, window._cfConfig);
+  if(window._cfConfig) {
+    await fetchUpsells(cart);
+    renderCart(cart, window._cfConfig);
+    if (!document.getElementById('cf-overlay')?.classList.contains('open')) openCart();
+  }
 }
     }, { passive: false, capture: true });
   }
