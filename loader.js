@@ -2,7 +2,7 @@
 
   // — Tracking capture (persist across navigation) —
   (function(){
-    var keys=['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term'];
+    var keys=['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id'];
     var p=new URLSearchParams(window.location.search);
     var t={};
     try{t=JSON.parse(sessionStorage.getItem('_octo_tracking')||'{}')}catch(e){}
@@ -14,6 +14,14 @@
     if(t.fbclid&&!t['_fbc'])t['_fbc']='fb.1.'+Date.now()+'.'+t.fbclid;
     t['landing_page']=t['landing_page']||window.location.pathname;
     t['referrer']=t['referrer']||document.referrer||'';
+    var ttp=(document.cookie.match(/(?:^|; )_ttp=([^;]*)/)||[])[1];
+    if(ttp)t['ttp']=decodeURIComponent(ttp);
+    t['host']=t['host']||window.location.host;
+    t['locale']=t['locale']||navigator.language||'en';
+    t['sh']=screen.height;t['sw']=screen.width;
+    var vid=localStorage.getItem('_octo_vid');
+    if(!vid){vid=crypto.randomUUID();localStorage.setItem('_octo_vid',vid);}
+    t['vid']=vid;
     try{sessionStorage.setItem('_octo_tracking',JSON.stringify(t))}catch(e){}
   })();
 
@@ -1009,7 +1017,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','_fbp','_fbc','landing_page','referrer'];
+        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','_fbp','_fbc','ttp','host','locale','sh','sw','vid','landing_page','referrer'];
     var pageParams = new URLSearchParams(window.location.search);
     var storedTracking = {};
     try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
