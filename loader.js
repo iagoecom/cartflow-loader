@@ -1,28 +1,63 @@
 (async () => {
 
-  // — Tracking capture (persist across navigation) —
+  // — Tracking capture (triple-layer: localStorage + cookie 30d + sessionStorage) —
   (function(){
-    var keys=['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id'];
-    var p=new URLSearchParams(window.location.search);
+    var keys=['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','wbraid','gbraid','tikclid','irclickid','ref','source'];
+    var trunc=function(v){return typeof v==='string'&&v.length>200?v.substring(0,200):v};
+
+    // Triple-layer restore: localStorage > cookie > sessionStorage
     var t={};
-    try{t=JSON.parse(sessionStorage.getItem('_octo_tracking')||'{}')}catch(e){}
-    keys.forEach(function(k){var v=p.get(k);if(v)t[k]=v});
+    try{t=JSON.parse(localStorage.getItem('_octo_tracking')||'{}')}catch(e){}
+    if(!Object.keys(t).length){
+      try{var ck=(document.cookie.match(/(?:^|; )_octo_tracking=([^;]*)/)||[])[1];if(ck)t=JSON.parse(decodeURIComponent(ck))}catch(e){}
+    }
+    if(!Object.keys(t).length){
+      try{t=JSON.parse(sessionStorage.getItem('_octo_tracking')||'{}')}catch(e){}
+    }
+
+    // 1. URL params (primary)
+    var p=new URLSearchParams(window.location.search);
+    keys.forEach(function(k){var v=p.get(k);if(v)t[k]=trunc(v)});
+
+    // 2. Hash params (e.g. #?utm_source=...)
+    try{var hashQ=window.location.hash.split('?')[1];if(hashQ){var hp=new URLSearchParams(hashQ);keys.forEach(function(k){if(!t[k]){var v=hp.get(k);if(v)t[k]=trunc(v)}})}}catch(e){}
+
+    // 3. Referrer UTM extraction (fallback like HeroCart)
+    if(document.referrer){
+      try{
+        var refUrl=new URL(document.referrer);
+        var rp=refUrl.searchParams;
+        keys.forEach(function(k){if(!t[k]){var v=rp.get(k);if(v)t[k]=trunc(v)}});
+        t['referrer_domain']=t['referrer_domain']||refUrl.hostname;
+      }catch(e){}
+    }
+
+    // Cookies: _fbp, _fbc, _ttp
     var fbp=(document.cookie.match(/(?:^|; )_fbp=([^;]*)/)||[])[1];
     var fbc=(document.cookie.match(/(?:^|; )_fbc=([^;]*)/)||[])[1];
     if(fbp)t['_fbp']=decodeURIComponent(fbp);
     if(fbc)t['_fbc']=decodeURIComponent(fbc);
     if(t.fbclid&&!t['_fbc'])t['_fbc']='fb.1.'+Date.now()+'.'+t.fbclid;
-    t['landing_page']=t['landing_page']||window.location.pathname;
-    t['referrer']=t['referrer']||document.referrer||'';
     var ttp=(document.cookie.match(/(?:^|; )_ttp=([^;]*)/)||[])[1];
     if(ttp)t['ttp']=decodeURIComponent(ttp);
+
+    // Environment data
+    t['landing_page']=t['landing_page']||window.location.pathname;
+    t['referrer']=t['referrer']||document.referrer||'';
     t['host']=t['host']||window.location.host;
     t['locale']=t['locale']||navigator.language||'en';
     t['sh']=screen.height;t['sw']=screen.width;
+
+    // Persistent visitor ID
     var vid=localStorage.getItem('_octo_vid');
-    if(!vid){vid=crypto.randomUUID();localStorage.setItem('_octo_vid',vid);}
+    if(!vid){try{vid=crypto.randomUUID()}catch(e){vid='xxxx-xxxx'.replace(/x/g,function(){return(Math.random()*16|0).toString(16)})}localStorage.setItem('_octo_vid',vid);}
     t['vid']=vid;
-    try{sessionStorage.setItem('_octo_tracking',JSON.stringify(t))}catch(e){}
+
+    // Triple-layer persist
+    var json=JSON.stringify(t);
+    try{localStorage.setItem('_octo_tracking',json)}catch(e){}
+    try{document.cookie='_octo_tracking='+encodeURIComponent(json)+';path=/;max-age=2592000;SameSite=Lax'}catch(e){}
+    try{sessionStorage.setItem('_octo_tracking',json)}catch(e){}
   })();
 
 
@@ -1017,10 +1052,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','_fbp','_fbc','ttp','host','locale','sh','sw','vid','landing_page','referrer'];
+        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','wbraid','gbraid','tikclid','irclickid','ref','source','referrer_domain','_fbp','_fbc','ttp','host','locale','sh','sw','vid','landing_page','referrer'];
     var pageParams = new URLSearchParams(window.location.search);
     var storedTracking = {};
-    try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
+    try { storedTracking = JSON.parse(localStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
+    if (!Object.keys(storedTracking).length) { try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {} }
     trackingKeys.forEach(function(k) {
       var val = pageParams.get(k) || storedTracking[k] || null;
       if (val) {
@@ -1034,6 +1070,24 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     try { new URLSearchParams(window.location.search).forEach(function(v,k){ _allT[k]=v; }); } catch(e){}
     if (_allT.fbclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "fbclid=" + encodeURIComponent(_allT.fbclid);
     if (_allT.ttclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "ttclid=" + encodeURIComponent(_allT.ttclid);
+    // Pre-checkout: POST /cart/update.js to persist attributes in Shopify session (like HeroCart)
+    var attrPayload = {};
+    trackingKeys.forEach(function(k) {
+      var val = pageParams.get(k) || storedTracking[k] || null;
+      if (val) attrPayload[k] = String(val).substring(0, 200);
+    });
+    attrPayload['source'] = 'octoroute';
+    try {
+      await Promise.race([
+        fetch('/cart/update.js', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attributes: attrPayload })
+        }),
+        new Promise(function(_, reject) { setTimeout(function() { reject('timeout'); }, 1500); })
+      ]);
+    } catch(e) { /* timeout or error — proceed to checkout anyway */ }
+
     return checkoutUrl;
   }
 
