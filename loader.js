@@ -42,7 +42,9 @@
     if(ttp)t['ttp']=decodeURIComponent(ttp);
 
     // Environment data
+    t['landing_page']=t['landing_page']||window.location.pathname;
     t['referrer']=t['referrer']||document.referrer||'';
+    t['host']=t['host']||window.location.host;
     t['locale']=t['locale']||navigator.language||'en';
     t['sh']=screen.height;t['sw']=screen.width;
 
