@@ -41,17 +41,10 @@
     var ttp=(document.cookie.match(/(?:^|; )_ttp=([^;]*)/)||[])[1];
     if(ttp)t['ttp']=decodeURIComponent(ttp);
 
-    // Environment data
-    t['landing_page']=t['landing_page']||window.location.pathname;
-    t['referrer']=t['referrer']||document.referrer||'';
-    t['host']=t['host']||window.location.host;
-    t['locale']=t['locale']||navigator.language||'en';
-    t['sh']=screen.height;t['sw']=screen.width;
 
     // Persistent visitor ID
     var vid=localStorage.getItem('_octo_vid');
     if(!vid){try{vid=crypto.randomUUID()}catch(e){vid='xxxx-xxxx'.replace(/x/g,function(){return(Math.random()*16|0).toString(16)})}localStorage.setItem('_octo_vid',vid);}
-    t['vid']=vid;
 
     // Triple-layer persist
     var json=JSON.stringify(t);
@@ -1055,28 +1048,35 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','wbraid','gbraid','tikclid','irclickid','ref','source','referrer_domain','_fbp','_fbc','ttp','host','locale','sh','sw','vid','landing_page','referrer'];
-    var pageParams = new URLSearchParams(window.location.search);
+        var trackingKeys = ['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','wbraid','gbraid','tikclid','irclickid','_fbp','_fbc','ttp'];
+    // Triple-layer read: localStorage -> cookie -> sessionStorage
     var storedTracking = {};
     try { storedTracking = JSON.parse(localStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
-    if (!Object.keys(storedTracking).length) { try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {} }
+    if (!Object.keys(storedTracking).length) {
+      try { var ck = (document.cookie.match(/(?:^|; )_octo_tracking=([^;]*)/)||[])[1]; if(ck) storedTracking = JSON.parse(decodeURIComponent(ck)); } catch(e) {}
+    }
+    if (!Object.keys(storedTracking).length) {
+      try { storedTracking = JSON.parse(sessionStorage.getItem('_octo_tracking') || '{}'); } catch(e) {}
+    }
+    // Live URL merge: fresh params override stored values (like HeroCart)
+    var pageParams = new URLSearchParams(window.location.search);
+    var mergedTracking = Object.assign({}, storedTracking);
+    pageParams.forEach(function(v, k) { if (v) mergedTracking[k] = v; });
     trackingKeys.forEach(function(k) {
-      var val = pageParams.get(k) || storedTracking[k] || null;
+      var val = mergedTracking[k] || null;
       if (val) {
-        checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'attributes[' + k + ']=' + encodeURIComponent(val);
+        checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'attributes[' + k + ']=' + encodeURIComponent(String(val).substring(0, 200));
       }
     });
     checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "attributes[source]=octoroute";
     if (bestCoupon?.shopify_coupon) checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + 'discount=' + encodeURIComponent(bestCoupon.shopify_coupon);
     // Top-level params for pixel compatibility
-    var _allT = Object.assign({}, storedTracking);
-    try { new URLSearchParams(window.location.search).forEach(function(v,k){ _allT[k]=v; }); } catch(e){}
-    if (_allT.fbclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "fbclid=" + encodeURIComponent(_allT.fbclid);
-    if (_allT.ttclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "ttclid=" + encodeURIComponent(_allT.ttclid);
+    if (mergedTracking.fbclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "fbclid=" + encodeURIComponent(mergedTracking.fbclid);
+    if (mergedTracking.ttclid) checkoutUrl += (checkoutUrl.includes("?") ? "&" : "?") + "ttclid=" + encodeURIComponent(mergedTracking.ttclid);
     // Pre-checkout: POST /cart/update.js to persist attributes in Shopify session (like HeroCart)
     var attrPayload = {};
     trackingKeys.forEach(function(k) {
-      var val = pageParams.get(k) || storedTracking[k] || null;
+      var val = mergedTracking[k] || null;
       if (val) attrPayload[k] = String(val).substring(0, 200);
     });
     attrPayload['source'] = 'octoroute';
