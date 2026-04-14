@@ -208,12 +208,16 @@
     _cartReady = true;
     if (_pendingOpen) {
       _pendingOpen = false;
-      fetchShopifyCart().then(async cart => {
+      fetchShopifyCart().then(cart => {
         if (window._cfConfig) {
-          await fetchUpsells(cart);
           window._lastCart = cart;
           renderCart(cart, window._cfConfig);
           openCart();
+          fetchUpsells(cart).then(() => {
+            if (window._cfConfig && window._lastCart) {
+              renderCart(window._lastCart, window._cfConfig);
+            }
+          }).catch(() => {});
         }
       });
     }
@@ -1186,11 +1190,19 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         }
         window._lastCart = cart;
         if (_cartReady && window._cfConfig) {
-          await fetchUpsells(cart);
           renderCart(cart, window._cfConfig);
           if (openAfter) openCart();
+          fetchUpsells(cart).then(() => {
+            if (window._cfConfig && window._lastCart) {
+              renderCart(window._lastCart, window._cfConfig);
+            }
+          }).catch(() => {});
         } else if (openAfter) { _pendingOpen = true; }
-      } catch(e) {}
+      } catch(e) {
+        if (openAfter && _cartReady && window._cfConfig) {
+          try { openCart(); } catch(e2) {}
+        }
+      }
     }, 0);
   }
 
