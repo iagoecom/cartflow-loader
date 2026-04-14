@@ -1218,6 +1218,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         try {
           const clone = await result.clone().json();
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
+            window._cfAddInFlight = true;
+            setTimeout(() => { window._cfAddInFlight = false; }, 500);
             debouncedCartRefresh(true);
           }
         } catch(e){}
@@ -1235,6 +1237,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
         this.addEventListener('load', () => {
+          window._cfAddInFlight = true;
+          setTimeout(() => { window._cfAddInFlight = false; }, 500);
           debouncedCartRefresh(true);
         });
       }
@@ -1249,15 +1253,20 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
       e.preventDefault();
 
-      const formData = new FormData(form);
+      // If theme already added via fetch/XHR, don't duplicate
+      if (window._cfAddInFlight) return;
 
+      // Fallback: native form submit (no fetch), do manual POST
+      const formData = new FormData(form);
       try {
+        window._cfAddInFlight = true;
         await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
           method: 'POST',
           body: formData
         });
         debouncedCartRefresh(true);
       } catch(err) { console.warn('[CF] form submit error', err); }
+      finally { setTimeout(() => { window._cfAddInFlight = false; }, 500); }
     }, { capture: true });
 
     document.addEventListener('click', async (e) => {
