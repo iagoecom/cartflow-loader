@@ -135,6 +135,28 @@
     window.addEventListener('pagehide', flushTrackQueue);
   } catch(e) {}
 
+  // ============ BFCACHE RESET (v11) ============
+  function resetCheckoutBtn() {
+    const btn = document.getElementById('cf-checkout');
+    if (btn) {
+      btn.disabled = false;
+      if (btn._origHtml) btn.innerHTML = btn._origHtml;
+    }
+  }
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) {
+      resetCheckoutBtn();
+      fetchShopifyCart().then(cart => {
+        window._lastCart = cart;
+        if (window._cfConfig) renderCart(cart, window._cfConfig);
+      }).catch(() => {});
+    }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resetCheckoutBtn();
+  });
+
+
   // ============ CART OPEN TIME TRACKING (v4) ============
   let _cartOpenedAt = null;
 
@@ -1151,25 +1173,22 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
   window.closeCart = closeCart;
 
-  // Debounced cart refresh — reduced to 100ms for faster response (v4)
+  // Debounced cart refresh — v11: wait for confirmed data before opening
   function debouncedCartRefresh(openAfter) {
     clearTimeout(_refreshTimer);
     _refreshTimer = setTimeout(async () => {
       try {
-        // Optimistic: open immediately with cached data
-        if (openAfter && _cartReady && window._cfConfig && window._lastCart) {
-          renderCart(window._lastCart, window._cfConfig);
-          openCart();
-        }
-        // Background: fetch fresh data and re-render
+        await new Promise(r => setTimeout(r, 300));
         let cart = await fetchShopifyCart();
+        if (cart.item_count === 0 && openAfter) {
+          await new Promise(r => setTimeout(r, 400));
+          cart = await fetchShopifyCart();
+        }
         window._lastCart = cart;
         if (_cartReady && window._cfConfig) {
           await fetchUpsells(cart);
           renderCart(cart, window._cfConfig);
-          if (openAfter && !document.getElementById('cf-overlay')?.classList.contains('open')) {
-            openCart();
-          }
+          if (openAfter) openCart();
         } else if (openAfter) { _pendingOpen = true; }
       } catch(e) {}
     }, 0);
@@ -1186,7 +1205,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
         try {
           const clone = await result.clone().json();
-          // Optimistic render: show added item immediately
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
             debouncedCartRefresh(true);
           }
@@ -1205,9 +1223,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const url = this._cfUrl || '';
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('_cf=1')) {
         this.addEventListener('load', () => {
-          setTimeout(() => {
-            debouncedCartRefresh(true);
-          }, 50);
+          debouncedCartRefresh(true);
         });
       }
       return origXHRSend.apply(this, arguments);
@@ -1220,12 +1236,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if (!action.includes('/cart/add')) return;
 
       e.preventDefault();
-      
 
       const formData = new FormData(form);
 
       try {
-        const formRes = await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+        await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
           method: 'POST',
           body: formData
         });
@@ -1241,7 +1256,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         const btn = document.getElementById('cf-checkout');
         if(!btn||btn.disabled) return;
         btn.disabled = true;
-        const origHtml = btn.innerHTML;
+        btn._origHtml = btn._origHtml || btn.innerHTML;
+        const origHtml = btn._origHtml;
         btn.innerHTML = `${SVG_ICONS.spin} SECURE CHECKOUT`;
         trackEvent('checkout_clicked');
         try {
@@ -1272,12 +1288,10 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   const isInProductCtx = triggerEl.closest('[data-section-type="product"], .product-form, product-info, form[action*="/cart/add"]');
   if (isAddToCart || isSubmit || isInProductCtx) return;
   e.preventDefault(); e.stopPropagation();
-  // Optimistic: open immediately with cache
   if(window._cfConfig && window._lastCart) {
     renderCart(window._lastCart, window._cfConfig);
     openCart();
   }
-  // Background: refresh data
   const cart = await fetchShopifyCart();
   window._lastCart = cart;
   if(window._cfConfig) {
@@ -1292,7 +1306,6 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   try {
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
 
-
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
@@ -1302,7 +1315,6 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     window._cfConfig = config;
     _storeCurrency = config.visual?.store_currency || 'USD';
 
-    // Detect visitor currency (v5 — opt-in only)
     if (config.visual?.currency_conversion_enabled === true) {
       _visitorCurrency = detectVisitorCurrency();
     }
@@ -1316,7 +1328,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     renderCart(initialCart, config);
     onCartReady();
     trackEvent('cart_impression');
-    console.log('[CartFlow] ✓ Loaded v5');
+    console.log('[CartFlow] ✓ Loaded v11');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
