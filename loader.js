@@ -673,7 +673,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       return {
         items: (c.items||[]).map(i => ({ title: i.title, variant: i.variant_title||'', qty: i.quantity, price: (i.price||0)/100 })),
         item_count: c.item_count || 0,
-        total: c.total_price ? c.total_price/100 : 0
+        total: c.total_price ? c.total_price/100 : 0,
+        addon_total: window._cfAddonTotal || 0,
+        upsell_total: window._cfUpsellTotal || 0
       };
     })());
   }
@@ -1092,6 +1094,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       addonTotal += v.sp_price_type==='percentage' ? rawSubtotalDollars*spPrice/100 : spPrice;
     }
     if (_gwActive && v.gift_wrap_enabled) addonTotal += Number(v.gift_wrap_price||2.99);
+    window._cfAddonTotal = addonTotal;
+    window._cfUpsellTotal = upsellTotalDollars;
     const finalSubtotal = Math.max(0, (rawSubtotalDollars - upsellTotalDollars) - rewardDiscount + upsellTotalDollars + addonTotal);
     const subtotalEl = document.getElementById('cf-subtotal');
     if (subtotalEl) subtotalEl.textContent = formatPriceDollars(finalSubtotal);
@@ -1188,21 +1192,12 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     return checkoutUrl;
   }
 
-window.cfToggleAddon = (type) => {
+  window.cfToggleAddon = (type) => {
     _hadInteraction = true;
-    const v = window._cfConfig?.visual || {};
-    if (type === 'sp') {
-      _spActive = !_spActive;
-      const spPrice = _spActive ? Number(v.sp_price || 4.99) : 0;
-      trackEvent('addon_toggled', spPrice, { addon: 'shipping_protection', active: _spActive });
-    }
-    if (type === 'gw') {
-      _gwActive = !_gwActive;
-      const gwPrice = _gwActive ? Number(v.gift_wrap_price || 2.99) : 0;
-      trackEvent('addon_toggled', gwPrice, { addon: 'gift_wrap', active: _gwActive });
-    }
+    if (type === 'sp') { _spActive = !_spActive; trackEvent('addon_toggled', 0, { addon: 'shipping_protection', active: _spActive }); }
+    if (type === 'gw') { _gwActive = !_gwActive; trackEvent('addon_toggled', 0, { addon: 'gift_wrap', active: _gwActive }); }
     fetchShopifyCart().then(cart => { if (window._cfConfig) renderCart(cart, window._cfConfig); });
-};
+  };
 
   window.cfQty = async (key, qty) => {
     _hadInteraction = true;
@@ -1378,7 +1373,7 @@ window.cfToggleAddon = (type) => {
           const cart = _upsellPending ? await fetchShopifyCart() : (window._lastCart || await fetchShopifyCart());
           window._lastCart = cart;
           const url = await buildCheckoutUrl(cart.items, window._cfConfig);
-          trackEvent('checkout', cart.total_price/100);
+          trackEvent('checkout', cart.total_price/100, { addon_total: window._cfAddonTotal || 0, upsell_total: window._cfUpsellTotal || 0 });
           flushTrackQueue();
           try { sessionStorage.removeItem('_octo_checkout_ts'); } catch(e) {}
           await new Promise(r => setTimeout(r, 50));
@@ -1449,7 +1444,9 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     trackEvent('cart_impression', initialCart.total_price ? initialCart.total_price/100 : 0, {
       items: (initialCart.items||[]).map(i => ({ title: i.title, variant: i.variant_title||'', qty: i.quantity, price: (i.price||0)/100 })),
       item_count: initialCart.item_count || 0,
-      total: initialCart.total_price ? initialCart.total_price/100 : 0
+      total: initialCart.total_price ? initialCart.total_price/100 : 0,
+      addon_total: window._cfAddonTotal || 0,
+      upsell_total: window._cfUpsellTotal || 0
     });
     console.log('[CartFlow] ✓ Loaded v11.2 (upsell-discount-exclusion)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
