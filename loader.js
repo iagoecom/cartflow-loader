@@ -929,6 +929,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             if (plusBtn) plusBtn.setAttribute('onclick', `cfQty('${item.key}',${item.quantity+1})`);
             const delBtn = existing.querySelector('[data-cf-del]');
             if (delBtn) delBtn.setAttribute('onclick', `cfQty('${item.key}',0)`);
+            const tagEl = existing.querySelector('[data-cf-reward-tag]');
+            if (tagEl) { const lastLabel = activeRewardLabels[activeRewardLabels.length - 1] || ''; if (hasRewardDiscount && lastLabel) { tagEl.textContent = lastLabel; tagEl.style.display = 'inline-flex'; } else { tagEl.style.display = 'none'; } }
             existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
           } else {
             const div = document.createElement('div');
@@ -948,13 +950,14 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
                   <span data-cf-price style="font-size:${fs(15)}px;font-weight:700">${formatPriceDollars(displayPrice)}</span>
                   <span data-cf-save style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};${v.show_strikethrough && totalSavingsItem > 0.01 ? '' : 'display:none'}">(Save ${formatPriceDollars(totalSavingsItem)})</span>
                 </div>
-                <div style="margin-top:8px">
+                <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
                   <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
                     <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
                     <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
                     <span data-cf-plus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
-                   </div>
-                 </div>
+                  </div>
+                  <span data-cf-reward-tag style="display:${hasRewardDiscount && activeRewardLabels.length > 0 ? 'inline-flex' : 'none'};align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${v.text_color || '#1a1a1a'};">${activeRewardLabels.length > 0 ? activeRewardLabels[activeRewardLabels.length - 1] : ''}</span>
+                </div>
                </div>
             </div>`;
             const newNode = div.firstElementChild;
