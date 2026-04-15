@@ -1188,12 +1188,21 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     return checkoutUrl;
   }
 
-  window.cfToggleAddon = (type) => {
+window.cfToggleAddon = (type) => {
     _hadInteraction = true;
-    if (type === 'sp') { _spActive = !_spActive; trackEvent('addon_toggled', 0, { addon: 'shipping_protection', active: _spActive }); }
-    if (type === 'gw') { _gwActive = !_gwActive; trackEvent('addon_toggled', 0, { addon: 'gift_wrap', active: _gwActive }); }
+    const v = window._cfConfig?.visual || {};
+    if (type === 'sp') {
+      _spActive = !_spActive;
+      const spPrice = _spActive ? Number(v.sp_price || 4.99) : 0;
+      trackEvent('addon_toggled', spPrice, { addon: 'shipping_protection', active: _spActive });
+    }
+    if (type === 'gw') {
+      _gwActive = !_gwActive;
+      const gwPrice = _gwActive ? Number(v.gift_wrap_price || 2.99) : 0;
+      trackEvent('addon_toggled', gwPrice, { addon: 'gift_wrap', active: _gwActive });
+    }
     fetchShopifyCart().then(cart => { if (window._cfConfig) renderCart(cart, window._cfConfig); });
-  };
+};
 
   window.cfQty = async (key, qty) => {
     _hadInteraction = true;
