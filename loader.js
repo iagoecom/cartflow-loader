@@ -95,13 +95,6 @@
     }
   } catch(e) { _sessionId = 'sid_' + Date.now().toString(36); }
 
-  // --- Page view tracking (1x per session) ---
-  try {
-    if (!sessionStorage.getItem('_octo_pv')) {
-      trackEvent('page_view', 0, { pathname: window.location.pathname, referrer: document.referrer || '' });
-      sessionStorage.setItem('_octo_pv', '1');
-    }
-  } catch(e) {}
 
   // ============ TRACKING QUEUE (v4 — sendBeacon batch) ============
   let _trackQueue = [];
@@ -142,6 +135,14 @@
       if (document.visibilityState === 'hidden') flushTrackQueue();
     });
     window.addEventListener('pagehide', flushTrackQueue);
+  } catch(e) {}
+
+  // --- Page view tracking (1x per session) ---
+  try {
+    if (!sessionStorage.getItem('_octo_pv')) {
+      trackEvent('page_view', 0, { pathname: window.location.pathname, referrer: document.referrer || '' });
+      sessionStorage.setItem('_octo_pv', '1');
+    }
   } catch(e) {}
 
   // ============ BFCACHE RESET (v11) ============
