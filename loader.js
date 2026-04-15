@@ -701,8 +701,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       trackEvent('cart_closed', 0, { time_in_cart_seconds: seconds });
       _cartOpenedAt = null;
     }
-    // Reset upsell tracking so they reappear on next open
-    _addedUpsellSkus.clear();
     _lastSkus = '';
   }
 
@@ -971,11 +969,19 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     // Filter upsells: exclude products already in cart
     const upsells = config.upsells || [];
     const cartSkus = new Set(items.map(i => (i.sku||'').toUpperCase()).filter(Boolean));
+    const cartTitles = new Set(items.map(i => (i.product_title||i.title||'').toUpperCase()).filter(Boolean));
+    // Cleanup _addedUpsellSkus: remove SKUs no longer in cart
+    for (const sku of _addedUpsellSkus) {
+      const stillInCart = items.some(i => (i.sku||'').toUpperCase() === sku.toUpperCase());
+      if (!stillInCart) _addedUpsellSkus.delete(sku);
+    }
     const visibleUpsells = upsells.filter(u => {
-      const uSku = u.sku || u.variants?.[0]?.sku || '';
-      if (!uSku) return true;
-      if (cartSkus.has(uSku.toUpperCase())) return false;
-      if (_addedUpsellSkus.has(uSku)) return false;
+      const allSkus = [u.sku, ...(u.variants||[]).map(v => v.sku)].filter(Boolean);
+      for (const s of allSkus) {
+        if (cartSkus.has(s.toUpperCase())) return false;
+        if (_addedUpsellSkus.has(s)) return false;
+      }
+      if (u.title && cartTitles.has(u.title.toUpperCase())) return false;
       return true;
     });
 
