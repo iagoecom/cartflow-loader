@@ -970,10 +970,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
     // Filter upsells: exclude products already in cart
     const upsells = config.upsells || [];
-    const cartSkus = new Set(items.map(i => i.sku).filter(Boolean));
+    const cartSkus = new Set(items.map(i => (i.sku||'').toUpperCase()).filter(Boolean));
     const visibleUpsells = upsells.filter(u => {
       const uSku = u.sku || u.variants?.[0]?.sku || '';
-      return !uSku || !cartSkus.has(uSku);
+      if (!uSku) return true;
+      if (cartSkus.has(uSku.toUpperCase())) return false;
+      if (_addedUpsellSkus.has(uSku)) return false;
+      return true;
     });
 
     const topEl = document.getElementById('cf-upsells-top');
