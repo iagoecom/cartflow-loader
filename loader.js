@@ -113,7 +113,7 @@
     const payload = JSON.stringify({ events: batch });
     try {
       if (navigator.sendBeacon) {
-        const blob = new Blob([payload], { type: 'application/json' });
+        const blob = new Blob([payload], { type: 'text/plain' });
         navigator.sendBeacon(TRACK_URL, blob);
       } else {
         (window._cfOrigFetch || fetch)(TRACK_URL, {
@@ -1349,6 +1349,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           trackEvent('checkout', cart.total_price/100);
           flushTrackQueue();
           try { sessionStorage.removeItem('_octo_checkout_ts'); } catch(e) {}
+          await new Promise(r => setTimeout(r, 50));
           window.location.href = url || '/checkout';
        } catch(e) {
           trackEvent('error_checkout_redirect', 0, { message: e.message || 'redirect failed' });
