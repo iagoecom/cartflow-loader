@@ -811,18 +811,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         const totalValue = cart.total_price / 100;
         const simValue = Number(isQty ? totalQty : totalValue)||0;
         const sorted = [...tiers].sort((a,b) => (Number(a.minimum_value)||0) - (Number(b.minimum_value)||0));
-        const _excludeUpsells = v.exclude_upsells_from_discount === true;
         const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
         const rawSubtotal = rawSubtotalCents / 100;
-        const discountableSubtotalCents = _excludeUpsells
-          ? items.reduce((a,i) => _addedUpsellSkus.has(i.sku) ? a : a + i.price * i.quantity, 0)
-          : rawSubtotalCents;
-        const discountableSubtotal = discountableSubtotalCents / 100;
         const cheapestPrice = items.length > 0 ? Math.min(...items.map(i => i.price)) / 100 : 0;
         const unlockedTiers = sorted.filter(t => simValue >= (parseFloat(t.minimum_value)||0));
         const byType = new Map();
         for (const tier of unlockedTiers) {
-          const amount = getRewardDiscountAmount(tier, discountableSubtotal, cheapestPrice);
+          const amount = getRewardDiscountAmount(tier, rawSubtotal, cheapestPrice);
           const label = tier.reward_description || tier.reward_type;
           const existing = byType.get(tier.reward_type);
           if (!existing || amount > existing.amount) byType.set(tier.reward_type, { amount, label });
@@ -880,7 +875,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         if (emptyEl) emptyEl.remove();
         const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
         const rawSubtotalDollars = rawSubtotalCents / 100;
-        const discSubDollars = discountableSubtotal;
         // Clear optimistic/loading content before reconciliation
         Array.from(itemsEl.children).forEach(n => { if (!n.hasAttribute("data-cf-item-key")) n.remove(); });
         const newKeys = new Set(items.map(i => String(i.key)));
@@ -894,12 +888,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const shopifyOrigCents = item.original_price || item.price;
           const shopifyOrigDollars = shopifyOrigCents * item.quantity / 100;
           const lineCompareDollars = compareAtPriceDollars || shopifyOrigDollars;
-          const isExcludedUpsell = _excludeUpsells && _addedUpsellSkus.has(item.sku);
-          const itemShare = isExcludedUpsell ? 0 : (discSubDollars > 0 ? lineTotalDollars / discSubDollars : 0);
-          const itemRewardDiscount = isExcludedUpsell ? 0 : rewardDiscount * itemShare;
+          const itemShare = rawSubtotalDollars > 0 ? lineTotalDollars / rawSubtotalDollars : 0;
+          const itemRewardDiscount = rewardDiscount * itemShare;
           const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
           const hasCompareDiscount = lineCompareDollars > lineTotalDollars;
-          const hasRewardDiscount = !isExcludedUpsell && itemRewardDiscount > 0;
+          const hasRewardDiscount = itemRewardDiscount > 0;
           const hasDis = hasCompareDiscount || hasRewardDiscount;
           const displayPrice = hasRewardDiscount ? discountedTotal : lineTotalDollars;
           const totalSavingsItem = lineCompareDollars - displayPrice;
@@ -1070,16 +1063,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
     const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
     const rawSubtotalDollars = rawSubtotalCents / 100;
-    const upsellTotalDollars = _excludeUpsells
-      ? items.reduce((a,i) => _addedUpsellSkus.has(i.sku) ? a + i.price * i.quantity : a, 0) / 100
-      : 0;
     let addonTotal = 0;
     if (_spActive && v.shipping_protection_enabled) {
       const spPrice = Number(v.sp_price||4.99);
       addonTotal += v.sp_price_type==='percentage' ? rawSubtotalDollars*spPrice/100 : spPrice;
     }
     if (_gwActive && v.gift_wrap_enabled) addonTotal += Number(v.gift_wrap_price||2.99);
-    const finalSubtotal = Math.max(0, (rawSubtotalDollars - upsellTotalDollars) - rewardDiscount + upsellTotalDollars + addonTotal);
+    const finalSubtotal = Math.max(0, rawSubtotalDollars - rewardDiscount + addonTotal);
     const subtotalEl = document.getElementById('cf-subtotal');
     if (subtotalEl) subtotalEl.textContent = formatPriceDollars(finalSubtotal);
 
@@ -1430,7 +1420,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       item_count: initialCart.item_count || 0,
       total: initialCart.total_price ? initialCart.total_price/100 : 0
     });
-    console.log('[CartFlow] ✓ Loaded v11.2 (upsell-discount-exclusion)');
+    console.log('[CartFlow] ✓ Loaded v11.1 (diagnostics)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
