@@ -1247,14 +1247,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     clearTimeout(_refreshTimer);
     _refreshTimer = setTimeout(async () => {
       try {
-        await new Promise(r => setTimeout(r, 300));
         let cart = await fetchShopifyCart();
         if (cart.item_count === 0 && openAfter) {
-          await new Promise(r => setTimeout(r, 400));
+          await new Promise(r => setTimeout(r, 350));
           cart = await fetchShopifyCart();
         }
         window._lastCart = cart;
-        if (_cartReady && window._cfConfig) {
+        if (window._cfConfig) {
           renderCart(cart, window._cfConfig);
           if (openAfter) openCart();
           fetchUpsells(cart).then(() => {
@@ -1264,7 +1263,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           }).catch(() => {});
         } else if (openAfter) { _pendingOpen = true; }
       } catch(e) {
-        if (openAfter && _cartReady && window._cfConfig) {
+        if (openAfter && window._cfConfig) {
           try { openCart(); } catch(e2) {}
         }
       }
