@@ -61,10 +61,6 @@
 
   if (!TOKEN) { console.warn('[CartFlow] data-token not found'); return; }
 
-  // Save native fetch IMMEDIATELY — before any await — so interceptCart()
-  // always has a clean reference even if the user clicks Add to Cart during init.
-  if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
-
   // Preconnect hint for API domain
   try {
     const link = document.createElement('link');
@@ -78,12 +74,12 @@
   let _pendingOpen = false;
   let _spActive = false;
   let _gwActive = false;
+  let _lastSkus = '';
   let _vitrineSkuMap = null;
   let _lastCart = null;
   let _upsellPending = false;
   let _hadInteraction = false;
   let _addedUpsellSkus = new Set();
-  let _allUpsells = [];
   let _refreshTimer = null;
   const SCALE_MAP = { small: 1, medium: 1.15, large: 1.3 };
   let _fontScale = 1.15;
@@ -169,18 +165,15 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       resetCheckoutBtn();
-      // Detect checkout abandonment: user clicked checkout button, left, came back within 5min
-      // _octo_checkout_clicked guards against false positives from unrelated tab switches
+      // Detect checkout abandonment: user clicked checkout, left, came back within 5min
       try {
         const ts = sessionStorage.getItem('_octo_checkout_ts');
-        const clicked = sessionStorage.getItem('_octo_checkout_clicked');
-        if (ts && clicked && (Date.now() - parseInt(ts)) < 300000) {
+        if (ts && (Date.now() - parseInt(ts)) < 300000) {
           trackEvent('checkout_abandoned', 0, {
             cart_total: window._lastCart?.total_price ? window._lastCart.total_price / 100 : 0,
             item_count: window._lastCart?.item_count || 0
           });
           sessionStorage.removeItem('_octo_checkout_ts');
-          sessionStorage.removeItem('_octo_checkout_clicked');
         }
       } catch(e) {}
     }
@@ -190,34 +183,9 @@
   // ============ CART OPEN TIME TRACKING (v4) ============
   let _cartOpenedAt = null;
 
-  // ============ CURRENCY CONVERSION (v4 — dynamic rates with fallback) ============
-  const CURRENCY_RATES_FALLBACK = { USD: 1, BRL: 5.481, EUR: 0.899, GBP: 0.782 };
-  let CURRENCY_RATES = { ...CURRENCY_RATES_FALLBACK };
+  // ============ CURRENCY CONVERSION (v4) ============
+  const CURRENCY_RATES = { USD: 1, BRL: 5.481, EUR: 0.899, GBP: 0.782 };
   const CURRENCY_SYMBOLS = { USD: '$', BRL: 'R$', EUR: '€', GBP: '£' };
-
-  // Fetch live rates once per session (fallback to hardcoded on any failure)
-  (function fetchLiveRates() {
-    const RATES_CACHE_KEY = '_octo_fx_rates';
-    const RATES_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
-    try {
-      const raw = sessionStorage.getItem(RATES_CACHE_KEY);
-      if (raw) {
-        const { data, ts } = JSON.parse(raw);
-        if (Date.now() - ts < RATES_CACHE_TTL) { CURRENCY_RATES = { ...CURRENCY_RATES_FALLBACK, ...data }; return; }
-      }
-    } catch(e) {}
-    // openexchangerates free tier — no key needed for latest.json with base USD
-    fetch('https://open.er-api.com/v6/latest/USD', { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : null)
-      .then(json => {
-        if (!json?.rates) return;
-        const picked = {};
-        ['BRL','EUR','GBP','USD'].forEach(c => { if (json.rates[c]) picked[c] = json.rates[c]; });
-        CURRENCY_RATES = { ...CURRENCY_RATES_FALLBACK, ...picked };
-        try { sessionStorage.setItem(RATES_CACHE_KEY, JSON.stringify({ data: picked, ts: Date.now() })); } catch(e) {}
-      })
-      .catch(() => {}); // silently keep fallback rates
-  })();
   const TZ_CURRENCY_MAP = {
     'America/Sao_Paulo': 'BRL', 'America/Fortaleza': 'BRL', 'America/Recife': 'BRL',
     'America/Bahia': 'BRL', 'America/Belem': 'BRL', 'America/Manaus': 'BRL',
@@ -268,7 +236,11 @@
           window._lastCart = cart;
           renderCart(cart, window._cfConfig);
           openCart();
-          filterUpsellsForCart(cart);
+          fetchUpsells(cart).then(() => {
+            if (window._cfConfig && window._lastCart) {
+              renderCart(window._lastCart, window._cfConfig);
+            }
+          }).catch(() => {});
         }
       });
     }
@@ -332,19 +304,6 @@
   const CONFIG_CACHE_KEY = `cf_config_${TOKEN}`;
   const CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-  // Cleanup orphan config keys from old/different tokens (keeps localStorage clean)
-  // Runs async via setTimeout to never block init
-  setTimeout(() => {
-    try {
-      const keysToRemove = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith('cf_config_') && k !== CONFIG_CACHE_KEY) keysToRemove.push(k);
-      }
-      keysToRemove.forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
-    } catch(e) {}
-  }, 3000); // defer 3s — runs well after init is complete
-
   function getCachedConfig() {
     try {
       const raw = localStorage.getItem(CONFIG_CACHE_KEY);
@@ -370,7 +329,7 @@
     } catch(e) { return false; }
   }
 
-async function getConfig() {
+async function getConfig(skus) {
     // Try localStorage first (persistent across page loads)
     const cached = getCachedConfig();
     if (cached) {
@@ -379,7 +338,7 @@ async function getConfig() {
       _storeCurrency = cached.visual?.store_currency || 'USD';
       // Background refresh if stale
       if (!isCacheFresh()) {
-        fetch(`${API_URL}?token=${TOKEN}`)
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
           .then(r => r.ok ? r.json() : null)
           .then(fresh => {
             if (fresh) {
@@ -403,7 +362,7 @@ async function getConfig() {
         _gwActive = parsed.visual?.gw_pre_checked || false;
         _storeCurrency = parsed.visual?.store_currency || 'USD';
         setCachedConfig(parsed);
-        fetch(`${API_URL}?token=${TOKEN}`)
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
           .then(r => r.ok ? r.json() : null)
           .then(fresh => { if (fresh) { setCachedConfig(fresh); sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh)); window._cfConfig = fresh; _spActive = fresh.visual?.sp_pre_checked || false; _gwActive = fresh.visual?.gw_pre_checked || false; _storeCurrency = fresh.visual?.store_currency || 'USD'; } }).catch(()=>{});
         return parsed;
@@ -411,7 +370,7 @@ async function getConfig() {
     } catch(e) {}
     // Fresh fetch
     try {
-      const r = await fetch(`${API_URL}?token=${TOKEN}`);
+      const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`);
       if (!r.ok) { trackEvent('error_config_load', 0, { status: r.status, message: 'HTTP ' + r.status }); return null; }
       const data = await r.json();
       setCachedConfig(data);
@@ -428,19 +387,9 @@ async function getConfig() {
     try {
       _vitrineSkuMap = {};
       let page = 1;
-      const MAX_PAGES = 20; // safety cap — 20 × 250 = 5 000 products
-      while (page <= MAX_PAGES) {
-        const controller = new AbortController();
-        const pageTimeout = setTimeout(() => controller.abort(), 5000); // 5s per page
-        let data;
-        try {
-          const res = await (window._cfOrigFetch || fetch)(`/products.json?limit=250&page=${page}`, { signal: controller.signal });
-          data = await res.json();
-        } catch(pageErr) {
-          break; // abort or network error — stop pagination gracefully
-        } finally {
-          clearTimeout(pageTimeout);
-        }
+      while (true) {
+        const res = await (window._cfOrigFetch || fetch)(`/products.json?limit=250&page=${page}`);
+        const data = await res.json();
         if (!data.products || data.products.length === 0) break;
         for (const p of data.products) {
           for (const vr of p.variants) {
@@ -462,28 +411,18 @@ async function getConfig() {
     return _vitrineSkuMap;
   }
 
-  function filterUpsellsForCart(cart) {
-    const cfg = window._cfConfig;
-    if (!cfg || !cfg.upsell_triggers || !_allUpsells.length) { if (cfg) cfg.upsells = []; return; }
-    const triggers = cfg.upsell_triggers;
-    const upsellIds = new Set();
-    const cartSkus = new Set((cart.items || []).map(i => (i.sku || '').toLowerCase()));
-    for (const item of cart.items || []) {
-      const pid = String(item.product_id);
-      const list = triggers[pid];
-      if (list) list.forEach(t => upsellIds.add(t.upsell_product_id));
-    }
-    // Filter: show upsells not already in cart (by SKU match) and not manually added
-    const showIfInCart = cfg.visual?.upsells_show_if_in_cart !== false;
-    cfg.upsells = _allUpsells.filter(u => {
-      if (!upsellIds.has(u.id)) return false;
-      if (_addedUpsellSkus.has(u.sku)) return false;
-      if (!showIfInCart) {
-        const uSku = (u.sku || '').toLowerCase();
-        if (uSku && cartSkus.has(uSku)) return false;
-      }
-      return true;
-    });
+  async function fetchUpsells(cart) {
+    const skus = (cart.items || [])
+      .map(i => i.sku)
+      .filter(s => s && !_addedUpsellSkus.has(s))
+      .join(',');
+    if (!skus) { _lastSkus = ''; return; }
+    if (skus === _lastSkus) return;
+    _lastSkus = skus;
+    try {
+      const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`);
+      if (r.ok) { const data = await r.json(); if (window._cfConfig) window._cfConfig.upsells = data.upsells || []; }
+    } catch(e) {}
   }
 
   async function fetchShopifyCart() {
@@ -764,6 +703,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       trackEvent('cart_closed', 0, { time_in_cart_seconds: seconds });
       _cartOpenedAt = null;
     }
+    _lastSkus = '';
   }
 
   function buildUpsellVariantHtml(product, v) {
@@ -1304,7 +1244,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const cart = await fetchShopifyCart();
     window._lastCart = cart;
     if (window._cfConfig) {
-      filterUpsellsForCart(cart);
+      _lastSkus = '';
+      await fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
@@ -1328,14 +1269,18 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         if (window._cfConfig) {
           renderCart(cart, window._cfConfig);
           if (openAfter) openCart();
-          filterUpsellsForCart(cart);
+          fetchUpsells(cart).then(() => {
+            if (window._cfConfig && window._lastCart) {
+              renderCart(window._lastCart, window._cfConfig);
+            }
+          }).catch(() => {});
         } else if (openAfter) { _pendingOpen = true; }
       } catch(e) {
         if (openAfter && window._cfConfig) {
           try { openCart(); } catch(e2) {}
         }
       }
-    }, 100);
+    }, 0);
   }
 
   function interceptCart() {
@@ -1424,14 +1369,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         btn.innerHTML = `${SVG_ICONS.spin} SECURE CHECKOUT`;
         trackEvent('checkout_clicked');
         try { sessionStorage.setItem('_octo_checkout_ts', String(Date.now())); } catch(e) {}
-        try { sessionStorage.setItem('_octo_checkout_clicked', '1'); } catch(e) {}        try {
+        try {
           const cart = _upsellPending ? await fetchShopifyCart() : (window._lastCart || await fetchShopifyCart());
           window._lastCart = cart;
           const url = await buildCheckoutUrl(cart.items, window._cfConfig);
           trackEvent('checkout', cart.total_price/100, { addon_total: window._cfAddonTotal || 0, upsell_total: window._cfUpsellTotal || 0 });
           flushTrackQueue();
           try { sessionStorage.removeItem('_octo_checkout_ts'); } catch(e) {}
-          try { sessionStorage.removeItem('_octo_checkout_clicked'); } catch(e) {}
           await new Promise(r => setTimeout(r, 50));
           window.location.href = url || '/checkout';
        } catch(e) {
@@ -1458,26 +1402,31 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   const isInProductCtx = triggerEl.closest('[data-section-type="product"], .product-form, product-info, form[action*="/cart/add"]');
   if (isAddToCart || isSubmit || isInProductCtx) return;
   e.preventDefault(); e.stopPropagation();
+  if(window._cfConfig && window._lastCart) {
+    renderCart(window._lastCart, window._cfConfig);
+    openCart();
+  }
   const cart = await fetchShopifyCart();
   window._lastCart = cart;
   if(window._cfConfig) {
-    filterUpsellsForCart(cart);
+    await fetchUpsells(cart);
     renderCart(cart, window._cfConfig);
-    openCart();
+    if (!document.getElementById('cf-overlay')?.classList.contains('open')) openCart();
   }
 }
     }, { passive: false, capture: true });
   }
 
   try {
+    if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
+
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
-    const config = await getConfig();
+    _lastSkus = initialSkus;
+    const config = await getConfig(initialSkus);
     getVitrineSkuMap();
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
-    _allUpsells = config.upsells || [];
-    filterUpsellsForCart(initialCart);
     _storeCurrency = config.visual?.store_currency || 'USD';
 
     if (config.visual?.currency_conversion_enabled === true) {
@@ -1499,7 +1448,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       addon_total: window._cfAddonTotal || 0,
       upsell_total: window._cfUpsellTotal || 0
     });
-    console.log('[CartFlow] ✓ Loaded v12.2 (early-fetch-save + deferred-cache-cleanup + dynamic-fx)');
+    console.log('[CartFlow] ✓ Loaded v11.2 (upsell-discount-exclusion)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
