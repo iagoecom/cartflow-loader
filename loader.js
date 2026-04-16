@@ -562,6 +562,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   function injectHTML(v) {
     const overlay = document.createElement('div');
     overlay.id = 'cf-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCart(); });
     const borderMap = { none:'0px', thin:'1px', normal:'2px', thick:'3px' };
     const bdr = borderMap[v.header_border_thickness] || '1px';
     const headingMap = { h2:{fs:22,fw:700}, h3:{fs:18,fw:600}, h4:{fs:16,fw:600} };
@@ -1096,7 +1097,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     if (_gwActive && v.gift_wrap_enabled) addonTotal += Number(v.gift_wrap_price||2.99);
     window._cfAddonTotal = addonTotal;
     window._cfUpsellTotal = upsellTotalDollars;
-    const finalSubtotal = Math.max(0, (rawSubtotalDollars - upsellTotalDollars) - rewardDiscount + upsellTotalDollars + addonTotal);
+    const finalSubtotal = Math.max(0, rawSubtotalDollars - rewardDiscount + addonTotal);
     const subtotalEl = document.getElementById('cf-subtotal');
     if (subtotalEl) subtotalEl.textContent = formatPriceDollars(finalSubtotal);
 
@@ -1176,7 +1177,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session_id: sid, store_id: config.store.id, tracking_data: cleanTracking })
         }),
-        new Promise(function(_, reject) { setTimeout(function() { reject("timeout"); }, 2000); })
+        new Promise(function(_, reject) { setTimeout(function() { reject("timeout"); }, 800); })
       ]);
     } catch(e) { /* timeout or error — proceed anyway */ }
     /* --- HYBRID: pass ALL tracking attributes directly in URL (like HeroCart) --- */
@@ -1280,7 +1281,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           try { openCart(); } catch(e2) {}
         }
       }
-    }, 0);
+    }, 150);
   }
 
   function interceptCart() {
@@ -1292,11 +1293,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const url = String(args[0]||'');
       const result = await window._cfOrigFetch.apply(window, args);
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
+        window._cfAddInFlight = true;
+        setTimeout(() => { window._cfAddInFlight = false; }, 500);
         try {
           const clone = await result.clone().json();
           if (clone?.id || clone?.items || clone?.item_count !== undefined) {
-            window._cfAddInFlight = true;
-            setTimeout(() => { window._cfAddInFlight = false; }, 500);
             // Track add_to_cart from fetch wrapper
             if (url.includes('/cart/add')) {
               try {
@@ -1376,7 +1377,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           trackEvent('checkout', cart.total_price/100, { addon_total: window._cfAddonTotal || 0, upsell_total: window._cfUpsellTotal || 0 });
           flushTrackQueue();
           try { sessionStorage.removeItem('_octo_checkout_ts'); } catch(e) {}
-          await new Promise(r => setTimeout(r, 50));
           window.location.href = url || '/checkout';
        } catch(e) {
           trackEvent('error_checkout_redirect', 0, { message: e.message || 'redirect failed' });
@@ -1420,11 +1420,18 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   try {
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
 
+    // P0 FIX: Intercept Add-to-Cart IMMEDIATELY (before any async fetches)
+    interceptCart();
+
+    // Inject empty shell so drawer structure exists for pendingOpen
+    injectStyles({});
+    injectHTML({});
+
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
     const config = await getConfig(initialSkus);
-    getVitrineSkuMap();
+    // P1 FIX: Removed getVitrineSkuMap() from init — lazy-loaded only when adding upsells
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
     _storeCurrency = config.visual?.store_currency || 'USD';
@@ -1434,21 +1441,21 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     }
 
     _fontScale = SCALE_MAP[config.visual?.font_scale] || 1.15;
+
+    // Re-inject styles/HTML with real config (replaces empty shell)
+    const oldStyle = document.getElementById('cartflow-styles');
+    if (oldStyle) oldStyle.remove();
+    const oldOverlay = document.getElementById('cf-overlay');
+    if (oldOverlay) oldOverlay.remove();
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
-    interceptCart();
+
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
     window._lastCart = initialCart;
     renderCart(initialCart, config);
     onCartReady();
-    trackEvent('cart_impression', initialCart.total_price ? initialCart.total_price/100 : 0, {
-      items: (initialCart.items||[]).map(i => ({ title: i.title, variant: i.variant_title||'', qty: i.quantity, price: (i.price||0)/100 })),
-      item_count: initialCart.item_count || 0,
-      total: initialCart.total_price ? initialCart.total_price/100 : 0,
-      addon_total: window._cfAddonTotal || 0,
-      upsell_total: window._cfUpsellTotal || 0
-    });
-    console.log('[CartFlow] ✓ Loaded v11.2 (upsell-discount-exclusion)');
+    // P0 FIX: Removed cart_impression from init — cart_opened already tracks real opens
+    console.log('[CartFlow] \u2713 Loaded v11.3 (perf-fixes)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
