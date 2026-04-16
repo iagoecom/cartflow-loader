@@ -61,6 +61,10 @@
 
   if (!TOKEN) { console.warn('[CartFlow] data-token not found'); return; }
 
+  // Save native fetch IMMEDIATELY — before any await — so interceptCart()
+  // always has a clean reference even if the user clicks Add to Cart during init.
+  if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
+
   // Preconnect hint for API domain
   try {
     const link = document.createElement('link');
@@ -329,14 +333,17 @@
   const CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   // Cleanup orphan config keys from old/different tokens (keeps localStorage clean)
-  try {
-    const keysToRemove = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('cf_config_') && k !== CONFIG_CACHE_KEY) keysToRemove.push(k);
-    }
-    keysToRemove.forEach(k => localStorage.removeItem(k));
-  } catch(e) {}
+  // Runs async via setTimeout to never block init
+  setTimeout(() => {
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('cf_config_') && k !== CONFIG_CACHE_KEY) keysToRemove.push(k);
+      }
+      keysToRemove.forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
+    } catch(e) {}
+  }, 3000); // defer 3s — runs well after init is complete
 
   function getCachedConfig() {
     try {
@@ -1463,8 +1470,6 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   }
 
   try {
-    if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
-
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     const config = await getConfig();
@@ -1494,7 +1499,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       addon_total: window._cfAddonTotal || 0,
       upsell_total: window._cfUpsellTotal || 0
     });
-    console.log('[CartFlow] ✓ Loaded v12.1 (dynamic-fx + cache-cleanup + safer-abandonment + sku-timeout)');
+    console.log('[CartFlow] ✓ Loaded v12.2 (early-fetch-save + deferred-cache-cleanup + dynamic-fx)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
