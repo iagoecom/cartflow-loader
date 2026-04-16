@@ -348,7 +348,19 @@
     } catch(e) { return null; }
   }
 
-async function getConfig(skus) {
+
+  // FIX v11.11 - pre-cache de imagens de upsells: dispara <img>.src antes do render
+  // p/ garantir que estejam decodificadas no cache HTTP do browser na hora do paint.
+  function _cfPrecacheUpsellImages(cfg) {
+    try {
+      const list = (cfg && Array.isArray(cfg.upsells)) ? cfg.upsells : [];
+      list.forEach(u => {
+        const url = u.image_url || (u.variants && u.variants[0] && u.variants[0].image_url);
+        if (url) { const im = new Image(); im.decoding = 'async'; im.src = url; }
+      });
+    } catch(e) {}
+  }
+  async function getConfig(skus) {
     // Try localStorage first (persistent across page loads)
     const cached = getCachedConfig();
     if (cached) {
@@ -368,6 +380,7 @@ async function getConfig(skus) {
               setCachedConfig(fresh);
               sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh));
               window._cfConfig = fresh;
+              _cfPrecacheUpsellImages(fresh);
               _spActive = fresh.visual?.sp_pre_checked || false;
               _gwActive = fresh.visual?.gw_pre_checked || false;
               _storeCurrency = fresh.visual?.store_currency || 'USD';
@@ -551,6 +564,19 @@ async function getConfig(skus) {
         z-index:999999;transition:right 0.3s ease;display:flex;flex-direction:column;
         box-shadow:-4px 0 24px rgba(0,0,0,0.12);
         font-family:${v.inherit_fonts ? 'inherit' : 'system-ui,sans-serif'};
+        /* FIX v11.10 - mobile flicker: promote drawer to its own compositor layer to isolate repaints */
+        will-change: transform;
+        transform: translateZ(0);
+        -webkit-backface-visibility: hidden;
+        backface-visibility: hidden;
+        contain: layout paint style;
+      }
+      /* FIX v11.10 - mobile flicker: kill backdrop-blur on mobile (huge cost at 100vw) */
+      @media (max-width:768px) {
+        #cf-overlay {
+          backdrop-filter: none !important;
+          -webkit-backdrop-filter: none !important;
+        }
       }
       /* NEW v11.8: !important to beat mobile rules + force visible position when open */
       #cf-drawer.open { right:0 !important; }
@@ -1069,7 +1095,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const containerEmpty = targetForCheck && !targetForCheck.innerHTML.trim();
     const upsellsChanged = upsellIds !== prevUpsellIds || (visibleUpsells.length > 0 && containerEmpty);
     window._cfPrevUpsellIds = upsellIds;
-    if (upsellsChanged) {
+    // FIX v11.11 - upsell flicker: NÃO limpar containers preventivamente.
+    // O DOM-diff abaixo cuida de remover/adicionar só o que mudou. Limpar aqui
+    // forçaria re-render completo das <img> e causaria flicker a cada qty change.
+    // Se upsells foram desabilitados/zerados, limpamos explicitamente:
+    if (upsellsChanged && (!v.upsells_enabled || visibleUpsells.length === 0)) {
       if (topEl) topEl.innerHTML = '';
       if (btmEl) btmEl.innerHTML = '';
     }
@@ -1089,7 +1119,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
               const imgSrc = p.image_url || p.variants?.[0]?.image_url || '';
               return `
                 <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
-                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
+                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="async" fetchpriority="high"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
                   <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
                     <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
@@ -1106,7 +1136,54 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           </div>
         </div>`;
       const target = (v.upsells_position||'bottom') === 'top' ? topEl : btmEl;
-      if (target) target.innerHTML = html;
+      const otherTarget = (v.upsells_position||'bottom') === 'top' ? btmEl : topEl;
+      if (otherTarget) otherTarget.innerHTML = '';
+      if (target) {
+        // FIX v11.11 - DOM diff: preservar <img> existentes para eliminar flicker.
+        // Se o wrapper interno ainda não existe ou é a primeira renderização,
+        // injetamos o HTML completo. Senão, fazemos diff por data-cf-upsell-card.
+        const existingWrapper = target.querySelector('[data-cf-upsell-wrapper]');
+        if (!existingWrapper) {
+          // Primeira render: injetar HTML inteiro mas marcar o wrapper p/ próxima vez
+          target.innerHTML = html.replace('<div style="padding:12px 16px', '<div data-cf-upsell-wrapper="1" style="padding:12px 16px');
+        } else {
+          // DOM diff: parsear novo HTML em DocumentFragment, comparar cards
+          const tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          const newCards = Array.from(tmp.querySelectorAll('[data-cf-upsell-card]'));
+          const newIds = newCards.map(c => c.getAttribute('data-cf-upsell-card'));
+          const cardsContainer = existingWrapper.querySelector('div[style*="display:flex"]');
+          if (!cardsContainer) {
+            // Estrutura inesperada — fallback p/ innerHTML
+            target.innerHTML = html.replace('<div style="padding:12px 16px', '<div data-cf-upsell-wrapper="1" style="padding:12px 16px');
+          } else {
+            const existingCards = Array.from(cardsContainer.querySelectorAll('[data-cf-upsell-card]'));
+            const existingIds = existingCards.map(c => c.getAttribute('data-cf-upsell-card'));
+            // Remove cards que não estão mais
+            existingCards.forEach(c => {
+              const id = c.getAttribute('data-cf-upsell-card');
+              if (!newIds.includes(id)) c.remove();
+            });
+            // Adiciona/reordena cards novos preservando os existentes
+            const existingMap = {};
+            Array.from(cardsContainer.querySelectorAll('[data-cf-upsell-card]')).forEach(c => {
+              existingMap[c.getAttribute('data-cf-upsell-card')] = c;
+            });
+            newCards.forEach((nc, idx) => {
+              const id = nc.getAttribute('data-cf-upsell-card');
+              if (existingMap[id]) {
+                // Já existe → garantir ordem correta sem destruir <img>
+                const ref = cardsContainer.children[idx];
+                if (ref !== existingMap[id]) cardsContainer.insertBefore(existingMap[id], ref || null);
+              } else {
+                // Novo → inserir
+                const ref = cardsContainer.children[idx];
+                cardsContainer.insertBefore(nc, ref || null);
+              }
+            });
+          }
+        }
+      }
     }
 
     const addonEl = document.getElementById('cf-addon-section');
@@ -1275,13 +1352,58 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     fetchShopifyCart().then(cart => { if (window._cfConfig) renderCart(cart, window._cfConfig); });
   };
 
-  window.cfQty = async (key, qty) => {
+  // FIX v11.10 - mobile flicker: optimistic UI + debounced sync (no full re-render per click)
+  window._cfQtyTimers = window._cfQtyTimers || {};
+  window._cfQtyPending = window._cfQtyPending || {};
+  window.cfQty = (key, qty) => {
     _hadInteraction = true;
     if (qty < 0) return;
-    await (window._cfOrigFetch||fetch)('/cart/change.js', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:key,quantity:qty}) });
-    const cart = await fetchShopifyCart();
-    window._lastCart = cart;
-    if (window._cfConfig) renderCart(cart, window._cfConfig);
+    // Optimistic DOM update: bump qty + line price locally, no innerHTML swap
+    try {
+      const itemNode = document.querySelector(`[data-cf-item-key="${key}"]`);
+      if (itemNode && window._lastCart) {
+        const item = (window._lastCart.items||[]).find(i => String(i.key) === String(key));
+        if (item) {
+          if (qty === 0) {
+            // Soft-hide the row immediately to avoid waiting for fetch
+            itemNode.style.transition = 'opacity 0.15s ease, max-height 0.2s ease';
+            itemNode.style.overflow = 'hidden';
+            itemNode.style.opacity = '0.4';
+          } else {
+            const qtyEl = itemNode.querySelector('[data-cf-qty]');
+            if (qtyEl) qtyEl.textContent = qty;
+            const minusBtn = itemNode.querySelector('[data-cf-minus]');
+            const plusBtn = itemNode.querySelector('[data-cf-plus]');
+            if (minusBtn) minusBtn.setAttribute('onclick', `cfQty('${key}',${qty-1})`);
+            if (plusBtn) plusBtn.setAttribute('onclick', `cfQty('${key}',${qty+1})`);
+            // Update local cart so subsequent clicks read fresh qty
+            item.quantity = qty;
+          }
+        }
+      }
+    } catch(e) {}
+    // Debounce network sync: collapse rapid +/- clicks into one POST
+    window._cfQtyPending[key] = qty;
+    clearTimeout(window._cfQtyTimers[key]);
+    window._cfQtyTimers[key] = setTimeout(async () => {
+      const finalQty = window._cfQtyPending[key];
+      delete window._cfQtyPending[key];
+      delete window._cfQtyTimers[key];
+      try {
+        await (window._cfOrigFetch||fetch)('/cart/change.js', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({id:key,quantity:finalQty})
+        });
+        const cart = await fetchShopifyCart();
+        window._lastCart = cart;
+        // Only do a full re-render if qty hit 0 (item removed) or if rewards/upsells need refresh
+        if (window._cfConfig) renderCart(cart, window._cfConfig);
+      } catch(err) {
+        // On error, force a full re-render to reconcile with server truth
+        try { const cart = await fetchShopifyCart(); window._lastCart = cart; if (window._cfConfig) renderCart(cart, window._cfConfig); } catch(e){}
+      }
+    }, 180);
   };
 
   window.cfAddUpsell = async (productId) => {
@@ -1511,6 +1633,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     getVitrineSkuMap();
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
+    _cfPrecacheUpsellImages(config);
     _storeCurrency = config.visual?.store_currency || 'USD';
 
     if (config.visual?.currency_conversion_enabled === true) {
@@ -1532,7 +1655,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       addon_total: window._cfAddonTotal || 0,
       upsell_total: window._cfUpsellTotal || 0
     });
-    console.log('[CartFlow] ✓ Loaded v11.9 (upsell reaparece fix + force re-render on open)');
+    console.log('[CartFlow] ✓ Loaded v11.11 (upsell perf: DOM-diff + image precache + SWR config)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 
