@@ -428,7 +428,13 @@ async function getConfig(skus) {
           const current = Array.isArray(window._cfConfig.upsells) ? window._cfConfig.upsells : [];
           // If backend returned upsells, replace; otherwise keep current to avoid clearing on race.
           if (incoming.length > 0 || current.length === 0) {
-            window._cfConfig.upsells = incoming;
+            // Snapshot the original/full list so we can restore items when the user removes them from cart
+            window._originalUpsells = incoming.slice();
+            // Filter out any upsells already added in this session
+            window._cfConfig.upsells = incoming.filter(u => {
+              const allSkus = [u.sku, ...((u.variants||[]).map(v => v.sku))].filter(Boolean);
+              return !allSkus.some(s => _addedUpsellSkus.has(s) || _addedUpsellSkus.has((s||'').toUpperCase()));
+            });
           }
         }
       }
@@ -983,11 +989,21 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const cartSkus = new Set(items.map(i => (i.sku||'').toUpperCase()).filter(Boolean));
     const cartTitles = new Set(items.map(i => (i.product_title||i.title||'').toUpperCase()).filter(Boolean));
     // Cleanup _addedUpsellSkus: remove SKUs no longer in cart
+    let _restoredAny = false;
     for (const sku of _addedUpsellSkus) {
       const stillInCart = items.some(i => (i.sku||'').toUpperCase() === sku.toUpperCase());
-      if (!stillInCart) _addedUpsellSkus.delete(sku);
+      if (!stillInCart) { _addedUpsellSkus.delete(sku); _restoredAny = true; }
     }
-    const visibleUpsells = upsells.filter(u => {
+    // Restore upsells from original snapshot when items are removed from cart
+    if (_restoredAny && Array.isArray(window._originalUpsells)) {
+      config.upsells = window._originalUpsells.filter(u => {
+        const allSkus = [u.sku, ...((u.variants||[]).map(v => v.sku))].filter(Boolean);
+        return !allSkus.some(s => _addedUpsellSkus.has(s) || _addedUpsellSkus.has((s||'').toUpperCase()));
+      });
+      if (window._cfConfig) window._cfConfig.upsells = config.upsells;
+    }
+    const finalUpsells = config.upsells || upsells;
+    const visibleUpsells = finalUpsells.filter(u => {
       const allSkus = [u.sku, ...(u.variants||[]).map(v => v.sku)].filter(Boolean);
       for (const s of allSkus) {
         if (cartSkus.has(s.toUpperCase())) return false;
@@ -1463,7 +1479,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       addon_total: window._cfAddonTotal || 0,
       upsell_total: window._cfUpsellTotal || 0
     });
-    console.log('[CartFlow] ✓ Loaded v11.4 (upsell-stability-fix)');
+    console.log('[CartFlow] ✓ Loaded v11.5 (upsell-restore-on-remove)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
