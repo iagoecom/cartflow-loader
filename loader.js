@@ -1,3 +1,4 @@
+/* OctoRoute Loader v11.8 — mobile fullscreen fix + auto version invalidation */
 (async () => {
 
   // — Tracking capture (triple-layer: localStorage + cookie 30d + sessionStorage) —
@@ -300,9 +301,10 @@
     protected_support: 'Protected purchase + 24/7 support',
   };
 
-  // ============ CONFIG CACHE WITH LOCALSTORAGE (v4 — 5min TTL) ============
+  // ============ CONFIG CACHE WITH LOCALSTORAGE (v11.7 — 30s TTL + version-based invalidation) ============
+  // NEW v11.7: TTL reduzido 5min -> 30s; também invalida por `version` (visual_config.updated_at)
   const CONFIG_CACHE_KEY = `cf_config_${TOKEN}`;
-  const CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  const CONFIG_CACHE_TTL = 30 * 1000; // NEW v11.7: 30 seconds (was 5 minutes)
 
   function getCachedConfig() {
     try {
@@ -329,6 +331,23 @@
     } catch(e) { return false; }
   }
 
+  // NEW v11.7: Lightweight version probe — checks if remote version differs from cached
+  async function checkRemoteVersion() {
+    try {
+      const cached = getCachedConfig();
+      const cachedVersion = cached?.version || null;
+      const r = await fetch(`${API_URL}?token=${TOKEN}&probe=1`, { cache: 'no-store' });
+      if (!r.ok) return null;
+      const fresh = await r.json();
+      if (!fresh) return null;
+      if (cachedVersion && fresh.version && cachedVersion !== fresh.version) {
+        // Version mismatch: invalidate cache immediately
+        try { localStorage.removeItem(CONFIG_CACHE_KEY); } catch(e) {}
+      }
+      return fresh;
+    } catch(e) { return null; }
+  }
+
 async function getConfig(skus) {
     // Try localStorage first (persistent across page loads)
     const cached = getCachedConfig();
@@ -338,16 +357,25 @@ async function getConfig(skus) {
       _storeCurrency = cached.visual?.store_currency || 'USD';
       // Background refresh if stale
       if (!isCacheFresh()) {
-        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
+        // NEW v11.7: bypass HTTP cache on background refresh
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { cache: 'no-store' })
           .then(r => r.ok ? r.json() : null)
           .then(fresh => {
             if (fresh) {
+              // NEW v11.7: if version changed, force re-render with new config
+              const cachedVersion = cached?.version || null;
+              const versionChanged = cachedVersion && fresh.version && cachedVersion !== fresh.version;
               setCachedConfig(fresh);
               sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh));
               window._cfConfig = fresh;
               _spActive = fresh.visual?.sp_pre_checked || false;
               _gwActive = fresh.visual?.gw_pre_checked || false;
               _storeCurrency = fresh.visual?.store_currency || 'USD';
+              // NEW v11.7: hot-reload styles + re-render if version changed
+              if (versionChanged) {
+                try { document.getElementById('cartflow-styles')?.remove(); injectStyles(fresh.visual||{}); } catch(e) {}
+                try { if (window._lastCart) renderCart(window._lastCart, fresh); } catch(e) {}
+              }
             }
           }).catch(()=>{});
       }
@@ -503,7 +531,9 @@ async function getConfig(skus) {
 
   function injectStyles(v) {
     const dw = getDrawerWidth(v);
-    const mw = v.cart_width_mobile === 'default' ? '90vw' : '100vw';
+    // NEW v11.7: support 'full' mobile width explicitly + correct default = 90vw
+    const cwm = v.cart_width_mobile || 'full';
+    const mw = cwm === 'default' ? '90vw' : (cwm === 'narrow' ? '85vw' : '100vw'); // 'full' or anything else -> 100vw
     const footerBg = v.accent_color || '#f6f6f7';
     // Overlay with configurable backdrop blur (v4)
     const overlayColor = v.overlay_color || 'rgba(0,0,0,0.5)';
@@ -522,7 +552,8 @@ async function getConfig(skus) {
         box-shadow:-4px 0 24px rgba(0,0,0,0.12);
         font-family:${v.inherit_fonts ? 'inherit' : 'system-ui,sans-serif'};
       }
-      #cf-drawer.open { right:0; }
+      /* NEW v11.8: !important to beat mobile rules + force visible position when open */
+      #cf-drawer.open { right:0 !important; }
       #cf-body { flex:1;overflow-y:auto;display:flex;flex-direction:column; }
       .cf-empty { text-align:center;padding:48px 16px;color:#999; }
       .cf-empty-icon { font-size:40px;margin-bottom:12px; }
@@ -565,7 +596,19 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     #cf-drawer .cf-loading-spinner { display:flex; justify-content:center; align-items:center; padding:40px 0; }
     #cf-drawer .cf-loading-spinner::after { content:""; width:32px; height:32px; border:3px solid rgba(0,0,0,0.1); border-top-color:#333; border-radius:50%; animation:cf-spin 0.6s linear infinite; }
       @keyframes cf-spin { to { transform: rotate(360deg); } }
-      @media (max-width:480px) { #cf-drawer { width:${mw};right:-${mw}; } }
+      /* NEW v11.8: mobile fullscreen fix — when 'full', force 100vw + left:0 + no transform; .open beats closed state */
+      @media (max-width:768px) {
+        #cf-drawer {
+          width:${mw}!important;
+          max-width:${mw}!important;
+          right:-${mw}!important;
+          ${cwm === 'full' ? 'left:auto!important;transform:none!important;' : ''}
+        }
+        #cf-drawer.open {
+          right:0!important;
+          ${cwm === 'full' ? 'left:0!important;width:100vw!important;max-width:100vw!important;' : ''}
+        }
+      }
     `;
     document.head.appendChild(style);
   }
@@ -1475,7 +1518,65 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       addon_total: window._cfAddonTotal || 0,
       upsell_total: window._cfUpsellTotal || 0
     });
-    console.log('[CartFlow] ✓ Loaded v11.4 (upsell-stability-fix)');
+    console.log('[CartFlow] ✓ Loaded v11.8 (mobile-fullscreen + auto-version-invalidation)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
+
+
+  // NEW v11.8: Public hot-reload API + automatic version polling.
+  window._cfHotReload = async function() {
+    try { localStorage.removeItem(CONFIG_CACHE_KEY); } catch(e) {}
+    try { sessionStorage.removeItem(`cf_config_${TOKEN}`); } catch(e) {}
+    try {
+      const r = await fetch(`${API_URL}?token=${TOKEN}`, { cache: 'no-store' });
+      if (!r.ok) return;
+      const fresh = await r.json();
+      if (!fresh) return;
+      setCachedConfig(fresh);
+      window._cfConfig = fresh;
+      _spActive = fresh.visual?.sp_pre_checked || false;
+      _gwActive = fresh.visual?.gw_pre_checked || false;
+      try { document.getElementById('cartflow-styles')?.remove(); injectStyles(fresh.visual||{}); } catch(e) {}
+      try { if (window._lastCart) renderCart(window._lastCart, fresh); } catch(e) {}
+    } catch(e) {}
+  };
+  window.addEventListener('message', function(ev) {
+    if (ev?.data === '__octo_hot_reload__') window._cfHotReload();
+  });
+
+  // NEW v11.8: Auto-invalidation — re-check version on tab focus / visibility change.
+  // Combined with `Cache-Control: no-cache, must-revalidate` on /config edge function,
+  // this means: user saves in dashboard → next focus on storefront tab → version mismatch
+  // detected → cache cleared → fresh config rendered. No manual refresh needed.
+  async function _cfAutoSync() {
+    try {
+      const cached = getCachedConfig();
+      const r = await fetch(`${API_URL}?token=${TOKEN}`, { cache: 'no-store' });
+      if (!r.ok) return;
+      const fresh = await r.json();
+      if (!fresh) return;
+      const cv = cached?.version || null;
+      const fv = fresh?.version || null;
+      if (cv && fv && cv !== fv) {
+        setCachedConfig(fresh);
+        try { sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh)); } catch(e) {}
+        window._cfConfig = fresh;
+        _spActive = fresh.visual?.sp_pre_checked || false;
+        _gwActive = fresh.visual?.gw_pre_checked || false;
+        _storeCurrency = fresh.visual?.store_currency || 'USD';
+        try { document.getElementById('cartflow-styles')?.remove(); injectStyles(fresh.visual||{}); } catch(e) {}
+        try { if (window._lastCart) renderCart(window._lastCart, fresh); } catch(e) {}
+        console.log('[CartFlow] ⟳ Auto-sync: config updated to v' + fv);
+      } else if (!cv && fv) {
+        // First seed of version
+        setCachedConfig(fresh);
+      }
+    } catch(e) {}
+  }
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') _cfAutoSync();
+  });
+  window.addEventListener('focus', _cfAutoSync);
+  // Periodic poll every 30s while tab is visible
+  setInterval(function() { if (document.visibilityState === 'visible') _cfAutoSync(); }, 30000);
 
 })();
