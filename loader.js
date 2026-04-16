@@ -721,6 +721,12 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     if (drawer) drawer.classList.add('open');
     document.body.style.overflow = 'hidden';
     _cartOpenedAt = Date.now();
+    // FIX v11.9 - upsell reaparece: força re-render dos upsells ao abrir o drawer.
+    // Garante que mesmo após cache hit/pre-render, o bloco de upsells é re-injetado.
+    window._cfPrevUpsellIds = '';
+    if (window._cfConfig && window._lastCart) {
+      try { renderCart(window._lastCart, window._cfConfig); } catch(e) {}
+    }
     trackEvent('cart_opened', 0, (() => {
       const c = window._lastCart;
       if (!c) return {};
@@ -758,6 +764,10 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       _cartOpenedAt = null;
     }
     _lastSkus = '';
+    // FIX v11.9 - upsell reaparece: força re-render dos upsells na próxima abertura.
+    // Bug: _cfPrevUpsellIds persistia entre fechamentos; se algo limpava o innerHTML
+    // dos containers, o bloco nunca re-injetava o HTML porque "upsellsChanged" virava false.
+    window._cfPrevUpsellIds = '';
   }
 
   function buildUpsellVariantHtml(product, v) {
@@ -1053,7 +1063,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const btmEl = document.getElementById('cf-upsells-bottom');
     const upsellIds = visibleUpsells.map(u => u.id).sort().join(',');
     const prevUpsellIds = window._cfPrevUpsellIds || '';
-    const upsellsChanged = upsellIds !== prevUpsellIds;
+    // FIX v11.9 - upsell reaparece: também re-renderiza se o container alvo está vazio
+    // (caso comum após fechar/abrir o drawer, ou após hot-reload de config).
+    const targetForCheck = (v.upsells_position||'bottom') === 'top' ? topEl : btmEl;
+    const containerEmpty = targetForCheck && !targetForCheck.innerHTML.trim();
+    const upsellsChanged = upsellIds !== prevUpsellIds || (visibleUpsells.length > 0 && containerEmpty);
     window._cfPrevUpsellIds = upsellIds;
     if (upsellsChanged) {
       if (topEl) topEl.innerHTML = '';
@@ -1518,7 +1532,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       addon_total: window._cfAddonTotal || 0,
       upsell_total: window._cfUpsellTotal || 0
     });
-    console.log('[CartFlow] ✓ Loaded v11.8 (mobile-fullscreen + auto-version-invalidation)');
+    console.log('[CartFlow] ✓ Loaded v11.9 (upsell reaparece fix + force re-render on open)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 
