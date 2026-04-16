@@ -74,12 +74,12 @@
   let _pendingOpen = false;
   let _spActive = false;
   let _gwActive = false;
+  let _lastSkus = '';
   let _vitrineSkuMap = null;
   let _lastCart = null;
   let _upsellPending = false;
   let _hadInteraction = false;
   let _addedUpsellSkus = new Set();
-  let _allUpsells = [];
   let _refreshTimer = null;
   const SCALE_MAP = { small: 1, medium: 1.15, large: 1.3 };
   let _fontScale = 1.15;
@@ -236,7 +236,11 @@
           window._lastCart = cart;
           renderCart(cart, window._cfConfig);
           openCart();
-          filterUpsellsForCart(cart);
+          fetchUpsells(cart).then(() => {
+            if (window._cfConfig && window._lastCart) {
+              renderCart(window._lastCart, window._cfConfig);
+            }
+          }).catch(() => {});
         }
       });
     }
@@ -325,7 +329,7 @@
     } catch(e) { return false; }
   }
 
-async function getConfig() {
+async function getConfig(skus) {
     // Try localStorage first (persistent across page loads)
     const cached = getCachedConfig();
     if (cached) {
@@ -334,7 +338,7 @@ async function getConfig() {
       _storeCurrency = cached.visual?.store_currency || 'USD';
       // Background refresh if stale
       if (!isCacheFresh()) {
-        fetch(`${API_URL}?token=${TOKEN}`)
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
           .then(r => r.ok ? r.json() : null)
           .then(fresh => {
             if (fresh) {
@@ -358,7 +362,7 @@ async function getConfig() {
         _gwActive = parsed.visual?.gw_pre_checked || false;
         _storeCurrency = parsed.visual?.store_currency || 'USD';
         setCachedConfig(parsed);
-        fetch(`${API_URL}?token=${TOKEN}`)
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
           .then(r => r.ok ? r.json() : null)
           .then(fresh => { if (fresh) { setCachedConfig(fresh); sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh)); window._cfConfig = fresh; _spActive = fresh.visual?.sp_pre_checked || false; _gwActive = fresh.visual?.gw_pre_checked || false; _storeCurrency = fresh.visual?.store_currency || 'USD'; } }).catch(()=>{});
         return parsed;
@@ -366,7 +370,7 @@ async function getConfig() {
     } catch(e) {}
     // Fresh fetch
     try {
-      const r = await fetch(`${API_URL}?token=${TOKEN}`);
+      const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`);
       if (!r.ok) { trackEvent('error_config_load', 0, { status: r.status, message: 'HTTP ' + r.status }); return null; }
       const data = await r.json();
       setCachedConfig(data);
@@ -407,28 +411,18 @@ async function getConfig() {
     return _vitrineSkuMap;
   }
 
-  function filterUpsellsForCart(cart) {
-    const cfg = window._cfConfig;
-    if (!cfg || !cfg.upsell_triggers || !_allUpsells.length) { if (cfg) cfg.upsells = []; return; }
-    const triggers = cfg.upsell_triggers;
-    const upsellIds = new Set();
-    const cartSkus = new Set((cart.items || []).map(i => (i.sku || '').toLowerCase()));
-    for (const item of cart.items || []) {
-      const pid = String(item.product_id);
-      const list = triggers[pid];
-      if (list) list.forEach(t => upsellIds.add(t.upsell_product_id));
-    }
-    // Filter: show upsells not already in cart (by SKU match) and not manually added
-    const showIfInCart = cfg.visual?.upsells_show_if_in_cart !== false;
-    cfg.upsells = _allUpsells.filter(u => {
-      if (!upsellIds.has(u.id)) return false;
-      if (_addedUpsellSkus.has(u.sku)) return false;
-      if (!showIfInCart) {
-        const uSku = (u.sku || '').toLowerCase();
-        if (uSku && cartSkus.has(uSku)) return false;
-      }
-      return true;
-    });
+  async function fetchUpsells(cart) {
+    const skus = (cart.items || [])
+      .map(i => i.sku)
+      .filter(s => s && !_addedUpsellSkus.has(s))
+      .join(',');
+    if (!skus) { _lastSkus = ''; return; }
+    if (skus === _lastSkus) return;
+    _lastSkus = skus;
+    try {
+      const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`);
+      if (r.ok) { const data = await r.json(); if (window._cfConfig) window._cfConfig.upsells = data.upsells || []; }
+    } catch(e) {}
   }
 
   async function fetchShopifyCart() {
@@ -709,6 +703,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       trackEvent('cart_closed', 0, { time_in_cart_seconds: seconds });
       _cartOpenedAt = null;
     }
+    _lastSkus = '';
   }
 
   function buildUpsellVariantHtml(product, v) {
@@ -1249,7 +1244,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const cart = await fetchShopifyCart();
     window._lastCart = cart;
     if (window._cfConfig) {
-      filterUpsellsForCart(cart);
+      _lastSkus = '';
+      await fetchUpsells(cart);
       renderCart(cart, window._cfConfig);
       trackEvent('upsell_added', product.price||0, { title: product.title, sku: selectedSku });
     }
@@ -1273,14 +1269,18 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         if (window._cfConfig) {
           renderCart(cart, window._cfConfig);
           if (openAfter) openCart();
-          filterUpsellsForCart(cart);
+          fetchUpsells(cart).then(() => {
+            if (window._cfConfig && window._lastCart) {
+              renderCart(window._lastCart, window._cfConfig);
+            }
+          }).catch(() => {});
         } else if (openAfter) { _pendingOpen = true; }
       } catch(e) {
         if (openAfter && window._cfConfig) {
           try { openCart(); } catch(e2) {}
         }
       }
-    }, 100);
+    }, 0);
   }
 
   function interceptCart() {
@@ -1402,12 +1402,16 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   const isInProductCtx = triggerEl.closest('[data-section-type="product"], .product-form, product-info, form[action*="/cart/add"]');
   if (isAddToCart || isSubmit || isInProductCtx) return;
   e.preventDefault(); e.stopPropagation();
+  if(window._cfConfig && window._lastCart) {
+    renderCart(window._lastCart, window._cfConfig);
+    openCart();
+  }
   const cart = await fetchShopifyCart();
   window._lastCart = cart;
   if(window._cfConfig) {
-    filterUpsellsForCart(cart);
+    await fetchUpsells(cart);
     renderCart(cart, window._cfConfig);
-    openCart();
+    if (!document.getElementById('cf-overlay')?.classList.contains('open')) openCart();
   }
 }
     }, { passive: false, capture: true });
@@ -1418,12 +1422,11 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
 
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
-    const config = await getConfig();
+    _lastSkus = initialSkus;
+    const config = await getConfig(initialSkus);
     getVitrineSkuMap();
     if (!config) { console.warn('[CartFlow] Config not found'); return; }
     window._cfConfig = config;
-    _allUpsells = config.upsells || [];
-    filterUpsellsForCart(initialCart);
     _storeCurrency = config.visual?.store_currency || 'USD';
 
     if (config.visual?.currency_conversion_enabled === true) {
@@ -1445,7 +1448,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       addon_total: window._cfAddonTotal || 0,
       upsell_total: window._cfUpsellTotal || 0
     });
-    console.log('[CartFlow] ✓ Loaded v12.0 (zero-latency-upsells)');
+    console.log('[CartFlow] ✓ Loaded v11.2 (upsell-discount-exclusion)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 })();
