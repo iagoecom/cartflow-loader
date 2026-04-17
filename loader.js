@@ -1,11 +1,40 @@
-/* OctoRoute Loader v11.11 — interceptors-first + pending buffer + iOS scroll lock */
+/* OctoRoute Loader v11.12 — image preload+cache + diff-render upsells + sync decode (anti-flicker) */
 (async () => {
-  // v11.11: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v11.11'; } catch(e) {}
+  // v11.12: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v11.12'; } catch(e) {}
   // v11.11: pending buffers — capture user intent BEFORE config is ready
   window._cfPendingAdds = window._cfPendingAdds || [];
   window._cfPendingOpen = false;
   window._cfConfigReady = false;
+
+  // v11.12: image cache + preload — prevents flicker when cart re-renders
+  // Browser network cache helps but DOM swap still causes paint flash without this.
+  window._cfImageCache = window._cfImageCache || new Map();
+  window._cfPreloadImages = function(urls){
+    try {
+      const list = (urls||[]).filter(u => u && typeof u === 'string' && !window._cfImageCache.has(u));
+      if (!list.length) return Promise.resolve();
+      return Promise.all(list.map(function(url){
+        return new Promise(function(resolve){
+          try {
+            const img = new Image();
+            img.decoding = 'async';
+            img.onload = function(){
+              window._cfImageCache.set(url, true);
+              if (typeof img.decode === 'function') {
+                img.decode().then(function(){ resolve(); }).catch(function(){ resolve(); });
+              } else { resolve(); }
+            };
+            img.onerror = function(){ resolve(); };
+            img.src = url;
+          } catch(e){ resolve(); }
+        });
+      })).then(function(){});
+    } catch(e){ return Promise.resolve(); }
+  };
+  // Inline placeholder + sync decode attrs for any <img> we render
+  // (1x1 transparent gif keeps box stable until real img paints)
+  window._cfImgAttrs = 'loading="eager" decoding="sync" fetchpriority="high"';
 
 
   // — Tracking capture (triple-layer: localStorage + cookie 30d + sessionStorage) —
@@ -711,7 +740,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const qty = item.quantity || 1;
       const variant = item.variant_title && item.variant_title !== 'Default Title' ? item.variant_title : '';
       html += `<div style="display:flex;gap:12px;padding:12px 16px;align-items:center;opacity:0.85;animation:cfFadeIn .3s ease forwards;">
-        ${img ? `<img src="${img}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;" />` : ''}
+        ${img ? `<img src="${img}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;background:#f5f5f5" loading="eager" decoding="sync" fetchpriority="high" />` : ''}
         <div style="flex:1;min-width:0;">
           <div style="font-size:${fs(14)}px;font-weight:500;color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
           ${variant ? `<div style="font-size:${fs(12)}px;color:${textColor};opacity:0.6;margin-top:2px;">${variant}</div>` : ''}
@@ -874,6 +903,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   };
 
   function renderCart(cart, config) {
+    // v11.12: preload all cart item images so swap doesn't flicker
+    try {
+      if (cart && cart.items && window._cfPreloadImages) {
+        const _urls = cart.items.map(function(it){ return it.image || (it.featured_image && it.featured_image.url) || ''; }).filter(Boolean);
+        if (_urls.length) window._cfPreloadImages(_urls);
+      }
+    } catch(e) {}
     const v = config.visual || {};
     const items = cart.items || [];
     const count = items.reduce((a,i) => a + i.quantity, 0);
@@ -1042,7 +1078,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             div.innerHTML = `
             <div data-cf-item-key="${item.key}" style="display:flex;align-items:center;gap:12px;padding:16px;${borderBottom}">
               <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
-                <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" />
+                <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high" />
               </div>
               <div style="flex:1;min-width:0">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -1111,6 +1147,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const upsellsChanged = upsellIds !== prevUpsellIds || (visibleUpsells.length > 0 && containerEmpty);
     window._cfPrevUpsellIds = upsellIds;
     if (upsellsChanged) {
+      // v11.12: preload upsell images BEFORE wiping DOM — browser cache hit → instant paint
+      try {
+        const _imgs = visibleUpsells.map(function(p){ return p.image_url || (p.variants && p.variants[0] && p.variants[0].image_url) || ''; }).filter(Boolean);
+        if (_imgs.length && window._cfPreloadImages) window._cfPreloadImages(_imgs);
+      } catch(e) {}
       if (topEl) topEl.innerHTML = '';
       if (btmEl) btmEl.innerHTML = '';
     }
@@ -1130,7 +1171,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
               const imgSrc = p.image_url || p.variants?.[0]?.image_url || '';
               return `
                 <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
-                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
+                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
                   <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
                     <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
