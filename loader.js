@@ -1,5 +1,12 @@
-/* OctoRoute Loader v11.8 — mobile fullscreen fix + auto version invalidation */
+/* OctoRoute Loader v11.11 — interceptors-first + pending buffer + iOS scroll lock */
 (async () => {
+  // v11.11: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v11.11'; } catch(e) {}
+  // v11.11: pending buffers — capture user intent BEFORE config is ready
+  window._cfPendingAdds = window._cfPendingAdds || [];
+  window._cfPendingOpen = false;
+  window._cfConfigReady = false;
+
 
   // — Tracking capture (triple-layer: localStorage + cookie 30d + sessionStorage) —
   (function(){
@@ -732,7 +739,17 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     if (ckBtn) { const btnText = window._cfConfig?.visual?.checkout_button_text || 'Secure Checkout'; ckBtn.disabled = false; ckBtn.innerHTML = `${SVG_ICONS.lock} ${btnText}`; }
     if (overlay) { overlay.style.display = 'block'; requestAnimationFrame(() => { overlay.classList.add('open'); }); }
     if (drawer) drawer.classList.add('open');
-    document.body.style.overflow = 'hidden';
+    // v11.11: iOS-safe scroll lock — position:fixed prevents background scroll on iOS Safari
+    try {
+      const sy = window.scrollY || window.pageYOffset || 0;
+      window._cfSavedScrollY = sy;
+      document.body.style.position = 'fixed';
+      document.body.style.top = '-' + sy + 'px';
+      document.body.style.left = '0';
+      document.body.style.right = '0';
+      document.body.style.width = '100%';
+      document.body.style.overflow = 'hidden';
+    } catch(e) { document.body.style.overflow = 'hidden'; }
     _cartOpenedAt = Date.now();
     // FIX v11.9 - upsell reaparece: força re-render dos upsells ao abrir o drawer.
     // Garante que mesmo após cache hit/pre-render, o bloco de upsells é re-injetado.
@@ -769,7 +786,18 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       setTimeout(() => { if (!overlay.classList.contains('open')) overlay.style.display = 'none'; }, 350);
     }
     document.getElementById('cf-drawer')?.classList.remove('open');
-    document.body.style.overflow = '';
+    // v11.11: restore iOS-safe scroll lock
+    try {
+      const sy = window._cfSavedScrollY || 0;
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.left = '';
+      document.body.style.right = '';
+      document.body.style.width = '';
+      document.body.style.overflow = '';
+      window.scrollTo(0, sy);
+      window._cfSavedScrollY = 0;
+    } catch(e) { document.body.style.overflow = ''; }
     // Track time in cart
     if (_cartOpenedAt) {
       const seconds = Math.round((Date.now() - _cartOpenedAt) / 1000);
@@ -1559,9 +1587,53 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     }, { passive: false, capture: true });
   }
 
+  // v11.11: interceptors-first — register fetch/XHR/submit/click capture BEFORE any await
+  // so user clicks during config load are captured into _cfPendingAdds buffer.
   try {
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
+    interceptCart();
+  } catch(e) { console.warn('[CartFlow] early interceptCart failed', e); }
 
+  // v11.11: expose synchronous opener so script-bootstrap queue can replay 'open' events
+  // even before config is ready. Buffers the open intent until config arrives.
+  window._cfOpenCart = function() {
+    if (window._cfConfigReady && window._cfConfig && window._lastCart) {
+      try { renderCart(window._lastCart, window._cfConfig); } catch(e) {}
+      try { openCart(); } catch(e) {}
+    } else {
+      window._cfPendingOpen = true;
+    }
+  };
+
+  // v11.11: drain pending buffer once config + cart are ready
+  function _cfFlushPending() {
+    try {
+      const pending = (window._cfPendingAdds || []).slice();
+      window._cfPendingAdds = [];
+      if (pending.length) {
+        // Fire each queued add via the standard cart endpoint; fetch wrapper will refresh drawer.
+        pending.forEach(function(item) {
+          try {
+            const body = item.formData || item.body;
+            if (body) {
+              (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', { method: 'POST', body: body })
+                .then(function(){ try { debouncedCartRefresh(true); } catch(e) {} })
+                .catch(function(){});
+            }
+          } catch(e) {}
+        });
+      }
+      if (window._cfPendingOpen) {
+        window._cfPendingOpen = false;
+        if (window._cfConfig && window._lastCart) {
+          try { renderCart(window._lastCart, window._cfConfig); } catch(e) {}
+          try { openCart(); } catch(e) {}
+        }
+      }
+    } catch(e) { console.warn('[CartFlow] flushPending error', e); }
+  }
+
+  try {
     const initialCart = await fetchShopifyCart();
     const initialSkus = (initialCart.items||[]).map(i => i.sku).filter(Boolean).join(',');
     _lastSkus = initialSkus;
@@ -1578,11 +1650,13 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     _fontScale = SCALE_MAP[config.visual?.font_scale] || 1.15;
     injectStyles(config.visual||{});
     injectHTML(config.visual||{});
-    interceptCart();
     if (config.visual?.announcement_timer) startTimer(config.visual.announcement_timer);
     window._lastCart = initialCart;
     renderCart(initialCart, config);
     onCartReady();
+    // v11.11: mark ready and drain buffered intents
+    window._cfConfigReady = true;
+    _cfFlushPending();
     trackEvent('cart_impression', initialCart.total_price ? initialCart.total_price/100 : 0, {
       items: (initialCart.items||[]).map(i => ({ title: i.title, variant: i.variant_title||'', qty: i.quantity, price: (i.price||0)/100 })),
       item_count: initialCart.item_count || 0,
@@ -1590,7 +1664,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       addon_total: window._cfAddonTotal || 0,
       upsell_total: window._cfUpsellTotal || 0
     });
-    console.log('[CartFlow] ✓ Loaded v11.10 (mobile flicker fix: optimistic qty + isolated repaints)');
+    console.log('[CartFlow] ✓ Loaded v11.11 (interceptors-first + pending buffer + iOS scroll lock)');
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 
