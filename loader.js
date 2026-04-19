@@ -1,7 +1,7 @@
-/* OctoRoute Loader v11.12 — image preload+cache + diff-render upsells + sync decode (anti-flicker) */
+/* OctoRoute Loader v12.0 — tracking loss recovery (await real + adblocker fallback + cookie sync) */
 (async () => {
   // v11.12: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v11.12'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v12.0'; } catch(e) {}
   // v11.11: pending buffers — capture user intent BEFORE config is ready
   window._cfPendingAdds = window._cfPendingAdds || [];
   window._cfPendingOpen = false;
@@ -39,7 +39,7 @@
 
   // — Tracking capture (triple-layer: localStorage + cookie 30d + sessionStorage) —
   (function(){
-    var keys=['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','wbraid','gbraid','tikclid','irclickid','ref','source'];
+    var keys=['fbclid','ttclid','gclid','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','wbraid','gbraid','tikclid','irclickid','msclkid','li_fat_id','twclid','sccid','epik','ref','source'];
     var trunc=function(v){return typeof v==='string'&&v.length>200?v.substring(0,200):v};
 
     // Triple-layer restore: localStorage > cookie > sessionStorage
@@ -1307,7 +1307,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-    var trackingKeys = ["fbclid","ttclid","gclid","utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","wbraid","gbraid","tikclid","irclickid","_fbp","_fbc","ttp"];
+    var trackingKeys = ["fbclid","ttclid","gclid","utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","wbraid","gbraid","tikclid","irclickid","msclkid","li_fat_id","twclid","sccid","epik","_fbp","_fbc","ttp"];
     var storedTracking = {};
     try { storedTracking = JSON.parse(localStorage.getItem("_octo_tracking") || "{}"); } catch(e) {}
     if (!Object.keys(storedTracking).length) {
@@ -1326,17 +1326,58 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if (val) cleanTracking[k] = String(val).substring(0, 200);
     });
     cleanTracking["source"] = "octoroute";
-    var sid = "ocs_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
+    // v12: SID estável (sessionStorage) — mesma sessão = mesmo SID em múltiplas tentativas
+    var sid = null;
+    try { sid = sessionStorage.getItem('_octo_sid_active'); } catch(e) {}
+    if (!sid) {
+      sid = "ocs_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
+      try { sessionStorage.setItem('_octo_sid_active', sid); } catch(e) {}
+    }
+    // v12: aguarda cookies de pixel hidratarem (FB/TikTok carregam async, até 800ms)
+    await new Promise(function(resolve){
+      var deadline = Date.now() + 800;
+      (function check(){
+        var hasFbp = /(?:^|; )_fbp=/.test(document.cookie);
+        var hasFbc = /(?:^|; )_fbc=/.test(document.cookie) || !mergedTracking.fbclid;
+        if ((hasFbp && hasFbc) || Date.now() >= deadline) return resolve();
+        setTimeout(check, 100);
+      })();
+    });
+    // Re-captura cookies após espera (pode ter chegado _fbp novo)
     try {
-      await Promise.race([
-        fetch("https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/store-checkout-attributes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sid, store_id: config.store.id, tracking_data: cleanTracking })
-        }),
-        new Promise(function(_, reject) { setTimeout(function() { reject("timeout"); }, 2000); })
-      ]);
-    } catch(e) { /* timeout or error — proceed anyway */ }
+      var fbpNow = (document.cookie.match(/(?:^|; )_fbp=([^;]*)/)||[])[1];
+      var fbcNow = (document.cookie.match(/(?:^|; )_fbc=([^;]*)/)||[])[1];
+      if (fbpNow && !cleanTracking._fbp) cleanTracking._fbp = decodeURIComponent(fbpNow);
+      if (fbcNow && !cleanTracking._fbc) cleanTracking._fbc = decodeURIComponent(fbcNow);
+    } catch(e) {}
+    // v12: POST com retry real (3 tentativas, backoff 300/700/1500ms, timeout 4s cada)
+    var _octoPostRetry = async function(url, body, retries, backoffs) {
+      for (var i = 0; i <= retries; i++) {
+        try {
+          var ctrl = new AbortController();
+          var to = setTimeout(function(){ ctrl.abort(); }, 4000);
+          var res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: ctrl.signal,
+            keepalive: true
+          });
+          clearTimeout(to);
+          if (res.ok) return true;
+        } catch(e) {}
+        if (i < retries) await new Promise(function(r){ setTimeout(r, backoffs[i] || 1000); });
+      }
+      return false;
+    };
+    try {
+      await _octoPostRetry(
+        "https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/store-checkout-attributes",
+        { session_id: sid, store_id: config.store.id, tracking_data: cleanTracking },
+        2,
+        [300, 700, 1500]
+      );
+    } catch(e) { /* fallback adblocker abaixo cobre */ }
     /* --- HYBRID: pass ALL tracking attributes directly in URL (like HeroCart) --- */
     var sep = checkoutUrl.includes("?") ? "&" : "?";
     for (var [ak, av] of Object.entries(cleanTracking)) {
