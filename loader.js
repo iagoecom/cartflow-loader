@@ -1326,17 +1326,63 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if (val) cleanTracking[k] = String(val).substring(0, 200);
     });
     cleanTracking["source"] = "octoroute";
-    var sid = "ocs_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
+// SID estável por sessão (sobrevive a múltiplos checkouts na mesma aba)
+var sid = sessionStorage.getItem("_octo_sid");
+if (!sid) {
+  sid = "ocs_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
+  try { sessionStorage.setItem("_octo_sid", sid); } catch(e) {}
+}
+
+// Espera cookies do FB Pixel hidratarem (até 800ms)
+var _waitStart = Date.now();
+while (Date.now() - _waitStart < 800) {
+  if ((document.cookie.match(/(?:^|; )_fbp=/)) || (document.cookie.match(/(?:^|; )_fbc=/))) break;
+  await new Promise(function(r){ setTimeout(r, 100); });
+}
+// Re-merge cookies que podem ter chegado depois
+var _fbpLate = (document.cookie.match(/(?:^|; )_fbp=([^;]*)/)||[])[1];
+var _fbcLate = (document.cookie.match(/(?:^|; )_fbc=([^;]*)/)||[])[1];
+if (_fbpLate && !cleanTracking._fbp) cleanTracking._fbp = decodeURIComponent(_fbpLate);
+if (_fbcLate && !cleanTracking._fbc) cleanTracking._fbc = decodeURIComponent(_fbcLate);
+
+// AWAIT REAL com 3 tentativas + backoff exponencial
+async function _octoPostRetry(url, body, attempts, backoffs) {
+  for (var i = 0; i < attempts; i++) {
+    if (backoffs[i] > 0) await new Promise(function(r){ setTimeout(r, backoffs[i]); });
     try {
-      await Promise.race([
-        fetch("https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/store-checkout-attributes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sid, store_id: config.store.id, tracking_data: cleanTracking })
-        }),
-        new Promise(function(_, reject) { setTimeout(function() { reject("timeout"); }, 2000); })
-      ]);
-    } catch(e) { /* timeout or error — proceed anyway */ }
+      var ctrl = new AbortController();
+      var tid = setTimeout(function(){ ctrl.abort(); }, 4000);
+      var res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+        keepalive: true
+      });
+      clearTimeout(tid);
+      if (res.ok) return true;
+    } catch(e) { /* try next */ }
+  }
+  return false;
+}
+
+// Em PARALELO: persist no Supabase + injeta SID no cart da white
+var _persistPromise = _octoPostRetry(
+  "https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/store-checkout-attributes",
+  { session_id: sid, store_id: config.store.id, tracking_data: cleanTracking },
+  3, [0, 300, 700]
+);
+var _cartPromise = _octoPostRetry(
+  "/cart/update.js",
+  { attributes: { _octo_sid: sid } },
+  3, [0, 400, 1000]
+);
+
+var _results = await Promise.all([_persistPromise, _cartPromise]);
+var _persistOk = _results[0];
+// Se persist falhou (adblocker?), o tracking via attributes[] na URL abaixo é o fallback
+if (!_persistOk) console.warn("[octo-tracking] persist failed, relying on URL attributes fallback");
+
     /* --- HYBRID: pass ALL tracking attributes directly in URL (like HeroCart) --- */
     var sep = checkoutUrl.includes("?") ? "&" : "?";
     for (var [ak, av] of Object.entries(cleanTracking)) {
