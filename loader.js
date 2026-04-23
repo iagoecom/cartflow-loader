@@ -1401,6 +1401,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         checkoutUrl += "&attributes[_octo_vid]=" + encodeURIComponent(_vid);
       }
     } catch(e) {}
+    // v13.1: propagate document.referrer (truncated 200 chars) for Falcon attribution
+    try {
+      var _ref = (document.referrer || "").slice(0, 200);
+      if (_ref && checkoutUrl.indexOf('attributes%5Breferrer%5D') === -1 && checkoutUrl.indexOf('attributes[referrer]') === -1) {
+        checkoutUrl += "&attributes[referrer]=" + encodeURIComponent(_ref);
+      }
+    } catch(e) {}
     if (bestCoupon?.shopify_coupon) checkoutUrl += "&discount=" + encodeURIComponent(bestCoupon.shopify_coupon);
     if (mergedTracking.fbclid) checkoutUrl += "&fbclid=" + encodeURIComponent(mergedTracking.fbclid);
     if (mergedTracking.ttclid) checkoutUrl += "&ttclid=" + encodeURIComponent(mergedTracking.ttclid);
