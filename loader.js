@@ -1,7 +1,7 @@
-/* OctoRoute Loader v12.0 — tracking loss recovery (await real + adblocker fallback + cookie sync) */
+/* OctoRoute Loader v13.0 — attribution recovery (HTTP-only vid mirror + CTA gating + page_view visitor_id) */
 (async () => {
   // v11.12: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v12.0'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v13.0'; } catch(e) {}
   // v11.11: pending buffers — capture user intent BEFORE config is ready
   window._cfPendingAdds = window._cfPendingAdds || [];
   window._cfPendingOpen = false;
@@ -82,6 +82,12 @@
     // Persistent visitor ID
     var vid=localStorage.getItem('_octo_vid');
     if(!vid){try{vid=crypto.randomUUID()}catch(e){vid='xxxx-xxxx'.replace(/x/g,function(){return(Math.random()*16|0).toString(16)})}localStorage.setItem('_octo_vid',vid);}
+    // v13: prefer HTTP-only cookie mirror injected by script-bootstrap (resists Safari ITP — 1 year vs 7 days for JS cookies)
+    if (window.__octoVid && window.__octoVid !== vid) {
+      vid = window.__octoVid;
+      try { localStorage.setItem('_octo_vid', vid); } catch(e) {}
+    }
+    try { window.__octoVid = vid; } catch(e) {} // ensure mirror exists even without bootstrap
 
     // Triple-layer persist
     var json=JSON.stringify(t);
@@ -155,12 +161,15 @@
   }
 
   function trackEvent(type, amount=0, metadata={}) {
+    // v13: propagate visitor_id top-level + in metadata so shopify-webhook can do first-touch lookup
+    var __vid = (typeof window !== 'undefined' && window.__octoVid) || null;
     _trackQueue.push({
       token: TOKEN,
       event_type: type,
       amount,
       session_id: _sessionId,
-      metadata: { ...metadata, user_agent: navigator.userAgent }
+      visitor_id: __vid,
+      metadata: { ...metadata, user_agent: navigator.userAgent, visitor_id: __vid }
     });
     clearTimeout(_trackFlushTimer);
     _trackFlushTimer = setTimeout(flushTrackQueue, 1500);
@@ -177,7 +186,7 @@
   // --- Page view tracking (1x per session) ---
   try {
     if (!sessionStorage.getItem('_octo_pv')) {
-      trackEvent('page_view', 0, { pathname: window.location.pathname, referrer: document.referrer || '' });
+      trackEvent('page_view', 0, { pathname: window.location.pathname, referrer: document.referrer || '', visitor_id: window.__octoVid || null }); // v13
       sessionStorage.setItem('_octo_pv', '1');
     }
   } catch(e) {}
@@ -1385,6 +1394,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       sep = "&";
     }
     checkoutUrl += sep + "attributes[_octo_sid]=" + encodeURIComponent(sid);
+    // v13: always propagate visitor_id, even if _octo_tracking is empty (enables first-touch lookup)
+    try {
+      var _vid = window.__octoVid;
+      if (_vid && checkoutUrl.indexOf('attributes%5B_octo_vid%5D') === -1 && checkoutUrl.indexOf('attributes[_octo_vid]') === -1) {
+        checkoutUrl += "&attributes[_octo_vid]=" + encodeURIComponent(_vid);
+      }
+    } catch(e) {}
     if (bestCoupon?.shopify_coupon) checkoutUrl += "&discount=" + encodeURIComponent(bestCoupon.shopify_coupon);
     if (mergedTracking.fbclid) checkoutUrl += "&fbclid=" + encodeURIComponent(mergedTracking.fbclid);
     if (mergedTracking.ttclid) checkoutUrl += "&ttclid=" + encodeURIComponent(mergedTracking.ttclid);
@@ -1806,5 +1822,47 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   window.addEventListener('focus', _cfAutoSync);
   // Periodic poll every 30s while tab is visible
   setInterval(function() { if (document.visibilityState === 'visible') _cfAutoSync(); }, 30000);
+
+  // ============ v13: NATIVE CTA GATING + READY SIGNAL ============
+  // Marks native checkout buttons with data-octo-checkout-cta so script-bootstrap CSS can disable
+  // them until the loader is ready. Prevents users clicking through before interception is wired.
+  (function(){
+    function markCTAs(root){
+      try {
+        var sel = '.shopify-payment-button, .shopify-payment-button__button, [name="checkout"], a[href*="/checkout"], button[name="checkout"]';
+        var nodes = (root && root.querySelectorAll) ? root.querySelectorAll(sel) : document.querySelectorAll(sel);
+        for (var i = 0; i < nodes.length; i++) {
+          var el = nodes[i];
+          if (!el.hasAttribute('data-octo-checkout-cta')) el.setAttribute('data-octo-checkout-cta','1');
+          if (window.__octoReady) el.setAttribute('data-octo-ready','1');
+        }
+      } catch(e) {}
+    }
+    markCTAs(document);
+    try {
+      var mo = new MutationObserver(function(muts){
+        for (var i = 0; i < muts.length; i++) {
+          var added = muts[i].addedNodes;
+          for (var j = 0; j < added.length; j++) {
+            if (added[j].nodeType === 1) markCTAs(added[j]);
+          }
+        }
+      });
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+    } catch(e) {}
+    function signalReady(){
+      try { window.__octoReady = true; } catch(e) {}
+      try {
+        var all = document.querySelectorAll('[data-octo-checkout-cta]');
+        for (var i = 0; i < all.length; i++) all[i].setAttribute('data-octo-ready','1');
+      } catch(e) {}
+    }
+    var fired = false;
+    var fire = function(){ if (fired) return; fired = true; signalReady(); };
+    var checkReady = setInterval(function(){
+      if (window._cfConfigReady || window._cfConfig) { clearInterval(checkReady); fire(); }
+    }, 100);
+    setTimeout(fire, 2000); // hard fallback so CTAs never stay disabled forever
+  })();
 
 })();
