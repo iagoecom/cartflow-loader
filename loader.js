@@ -1,20 +1,51 @@
-/* OctoRoute Loader v14.1 — clean checkout profile + transient referrer cloak (anti-suspension) */
+/* OctoRoute Loader v14.2 — selective referrer cloak (preserves ad/social attribution, hides Vitrine) */
 (async () => {
-  // v14.1: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v14.1'; } catch(e) {}
+  // v14.2: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v14.2'; } catch(e) {}
 
-  // v14.1 — Transient referrer cloak.
-  // Strips HTTP Referer header on checkout navigation by injecting
-  // <meta name="referrer" content="no-referrer"> in the SAME synchronous tick
-  // as location.href = checkoutUrl. Shopify White store sees "direct" instead
-  // of the Vitrine domain in "Visited your store from..." field — kills the
-  // cross-store correlation signal that drives mass suspensions.
-  // Meta exists for ~50ms (until unload) — passive DOM scanners on Vitrine
-  // see clean <head>, no cross-store fingerprint reintroduced.
+  // v14.2 — Selective transient referrer cloak.
+  // Goal: hide Vitrine domain from Shopify ("Visited your store from <vitrine>")
+  // WITHOUT killing legit ad/social attribution (Facebook, Google, TikTok, etc.).
+  // Logic: if document.referrer hostname matches a known ad/social platform,
+  // SKIP the cloak — let the Referer header through so Shopify shows
+  // "Visited your store from Facebook/Instagram/Google/...". Otherwise
+  // (Vitrine, unknown referrers, direct traffic) inject meta no-referrer
+  // synchronously before location.href = checkoutUrl.
+  // Meta exists for ~50ms (until unload) — no cross-store DOM fingerprint.
   // CRITICAL: must be called synchronously immediately before location.href.
-  // Any await/setTimeout between cloak and navigate breaks the effect.
   window.__octoCloakReferrer = function(){
     try {
+      // Whitelist: legit traffic sources Shopify SHOULD see
+      var SAFE_REFERRERS = [
+        'facebook.com','fb.com','fb.me','l.facebook.com','lm.facebook.com','m.facebook.com',
+        'instagram.com','l.instagram.com',
+        'google.com','google.','googleadservices.com','googlesyndication.com','doubleclick.net','googleusercontent.com',
+        'tiktok.com','bytedance.com','musical.ly',
+        'youtube.com','youtu.be',
+        't.co','twitter.com','x.com',
+        'bing.com','duckduckgo.com',
+        'pinterest.com','pin.it',
+        'snapchat.com','sc-cdn.net',
+        'linkedin.com','lnkd.in',
+        'reddit.com','out.reddit.com',
+        'whatsapp.com','wa.me','api.whatsapp.com',
+        'messenger.com','m.me',
+        'kwai.com','kwai-app.com'
+      ];
+      var ref = '';
+      try { ref = document.referrer || ''; } catch(e) {}
+      var refHost = '';
+      try { refHost = ref ? new URL(ref).hostname.toLowerCase() : ''; } catch(e) {}
+
+      // If referrer is a known ad/social platform → DO NOT cloak.
+      // Shopify will display the real source (Facebook/Instagram/Google/etc).
+      if (refHost) {
+        for (var s=0; s<SAFE_REFERRERS.length; s++) {
+          if (refHost.indexOf(SAFE_REFERRERS[s]) !== -1) return;
+        }
+      }
+
+      // Otherwise (Vitrine domain, unknown referrer, or none) → cloak.
       var existing = document.head.querySelectorAll('meta[name="referrer" i]');
       for (var i=0; i<existing.length; i++) existing[i].parentNode.removeChild(existing[i]);
       var m = document.createElement('meta');
@@ -1660,7 +1691,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           flushTrackQueue();
           try { sessionStorage.removeItem('_octo_checkout_ts'); } catch(e) {}
           await new Promise(r => setTimeout(r, 50));
-          window.__octoCloakReferrer();        // v14.1: strips Referer — same tick as navigation
+          window.__octoCloakReferrer();        // v14.2: selective cloak (hides Vitrine, preserves ad/social attribution)
           window.location.href = url || '/checkout';
        } catch(e) {
           trackEvent('error_checkout_redirect', 0, { message: e.message || 'redirect failed' });
