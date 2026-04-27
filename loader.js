@@ -1,7 +1,28 @@
-/* OctoRoute Loader v14.0 — clean checkout profile (no fingerprints, attribution preserved) */
+/* OctoRoute Loader v14.1 — clean checkout profile + transient referrer cloak (anti-suspension) */
 (async () => {
-  // v11.12: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v14.0'; } catch(e) {}
+  // v14.1: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v14.1'; } catch(e) {}
+
+  // v14.1 — Transient referrer cloak.
+  // Strips HTTP Referer header on checkout navigation by injecting
+  // <meta name="referrer" content="no-referrer"> in the SAME synchronous tick
+  // as location.href = checkoutUrl. Shopify White store sees "direct" instead
+  // of the Vitrine domain in "Visited your store from..." field — kills the
+  // cross-store correlation signal that drives mass suspensions.
+  // Meta exists for ~50ms (until unload) — passive DOM scanners on Vitrine
+  // see clean <head>, no cross-store fingerprint reintroduced.
+  // CRITICAL: must be called synchronously immediately before location.href.
+  // Any await/setTimeout between cloak and navigate breaks the effect.
+  window.__octoCloakReferrer = function(){
+    try {
+      var existing = document.head.querySelectorAll('meta[name="referrer" i]');
+      for (var i=0; i<existing.length; i++) existing[i].parentNode.removeChild(existing[i]);
+      var m = document.createElement('meta');
+      m.name = 'referrer';
+      m.content = 'no-referrer';
+      document.head.appendChild(m);
+    } catch(e) {}
+  };
   // v11.11: pending buffers — capture user intent BEFORE config is ready
   window._cfPendingAdds = window._cfPendingAdds || [];
   window._cfPendingOpen = false;
@@ -1639,6 +1660,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           flushTrackQueue();
           try { sessionStorage.removeItem('_octo_checkout_ts'); } catch(e) {}
           await new Promise(r => setTimeout(r, 50));
+          window.__octoCloakReferrer();        // v14.1: strips Referer — same tick as navigation
           window.location.href = url || '/checkout';
        } catch(e) {
           trackEvent('error_checkout_redirect', 0, { message: e.message || 'redirect failed' });
