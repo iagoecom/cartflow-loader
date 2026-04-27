@@ -59,7 +59,7 @@
     // 2. Hash params (e.g. #?utm_source=...)
     try{var hashQ=window.location.hash.split('?')[1];if(hashQ){var hp=new URLSearchParams(hashQ);keys.forEach(function(k){if(!t[k]){var v=hp.get(k);if(v)t[k]=trunc(v)}})}}catch(e){}
 
-    // 3. Referrer UTM extraction (fallback like HeroCart)
+    // 3. Referrer UTM extraction (fallback like OctoRoute)
     if(document.referrer){
       try{
         var refUrl=new URL(document.referrer);
