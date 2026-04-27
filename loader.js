@@ -1387,7 +1387,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         [300, 700, 1500]
       );
     } catch(e) { /* fallback adblocker abaixo cobre */ }
-    /* --- HYBRID: pass ALL tracking attributes directly in URL (like HeroCart) --- */
+    /* --- HYBRID: pass ALL tracking attributes directly in URL (like OctoRoute) --- */
     var sep = checkoutUrl.includes("?") ? "&" : "?";
     for (var [ak, av] of Object.entries(cleanTracking)) {
       checkoutUrl += sep + "attributes[" + encodeURIComponent(ak) + "]=" + encodeURIComponent(av);
