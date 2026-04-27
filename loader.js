@@ -1,7 +1,7 @@
-/* OctoRoute Loader v13.0 — attribution recovery (HTTP-only vid mirror + CTA gating + page_view visitor_id) */
+/* OctoRoute Loader v14.0 — clean checkout profile (no fingerprints, attribution preserved) */
 (async () => {
   // v11.12: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v13.0'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v14.0'; } catch(e) {}
   // v11.11: pending buffers — capture user intent BEFORE config is ready
   window._cfPendingAdds = window._cfPendingAdds || [];
   window._cfPendingOpen = false;
@@ -1316,7 +1316,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-    var trackingKeys = ["fbclid","ttclid","gclid","utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","wbraid","gbraid","tikclid","irclickid","msclkid","li_fat_id","twclid","sccid","epik","_fbp","_fbc","ttp"];
+    var trackingKeys = ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","fbclid","gclid","ttclid"];
     var storedTracking = {};
     try { storedTracking = JSON.parse(localStorage.getItem("_octo_tracking") || "{}"); } catch(e) {}
     if (!Object.keys(storedTracking).length) {
@@ -1334,7 +1334,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       var val = mergedTracking[k] || null;
       if (val) cleanTracking[k] = String(val).substring(0, 200);
     });
-    cleanTracking["source"] = "octoroute";
+    cleanTracking["source"] = "web";
     // v12: SID estável (sessionStorage) — mesma sessão = mesmo SID em múltiplas tentativas
     var sid = null;
     try { sid = sessionStorage.getItem('_octo_sid_active'); } catch(e) {}
@@ -1393,24 +1393,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       checkoutUrl += sep + "attributes[" + encodeURIComponent(ak) + "]=" + encodeURIComponent(av);
       sep = "&";
     }
-    checkoutUrl += sep + "attributes[_octo_sid]=" + encodeURIComponent(sid);
-    // v13: always propagate visitor_id, even if _octo_tracking is empty (enables first-touch lookup)
-    try {
-      var _vid = window.__octoVid;
-      if (_vid && checkoutUrl.indexOf('attributes%5B_octo_vid%5D') === -1 && checkoutUrl.indexOf('attributes[_octo_vid]') === -1) {
-        checkoutUrl += "&attributes[_octo_vid]=" + encodeURIComponent(_vid);
-      }
-    } catch(e) {}
-    // v13.1: propagate document.referrer (truncated 200 chars) for Falcon attribution
-    try {
-      var _ref = (document.referrer || "").slice(0, 200);
-      if (_ref && checkoutUrl.indexOf('attributes%5Breferrer%5D') === -1 && checkoutUrl.indexOf('attributes[referrer]') === -1) {
-        checkoutUrl += "&attributes[referrer]=" + encodeURIComponent(_ref);
-      }
-    } catch(e) {}
+    // v14.0: _octo_sid / _octo_vid / referrer no longer leak to public URL.
+    // Session is still POST'd to backend (session_id: sid above); recovery uses
+    // cart_token + customer_email Dual-Mode in shopify-webhook.
     if (bestCoupon?.shopify_coupon) checkoutUrl += "&discount=" + encodeURIComponent(bestCoupon.shopify_coupon);
-    if (mergedTracking.fbclid) checkoutUrl += "&fbclid=" + encodeURIComponent(mergedTracking.fbclid);
-    if (mergedTracking.ttclid) checkoutUrl += "&ttclid=" + encodeURIComponent(mergedTracking.ttclid);
+    // v14.0: removed top-level &fbclid / &ttclid duplicates — already in attributes[...] above.
     return checkoutUrl;
   }
 
