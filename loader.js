@@ -1817,46 +1817,23 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   // Periodic poll every 30s while tab is visible
   setInterval(function() { if (document.visibilityState === 'visible') _cfAutoSync(); }, 30000);
 
-  // ============ v13: NATIVE CTA GATING + READY SIGNAL ============
-  // Marks native checkout buttons with data-octo-checkout-cta so script-bootstrap CSS can disable
-  // them until the loader is ready. Prevents users clicking through before interception is wired.
+  // ============ v14.0: READY SIGNAL ONLY ============
+  // CSS gating do script-bootstrap foi removido em v14.0 (era fingerprint cruzado).
+  // Não marcamos mais data-octo-checkout-cta no DOM — atributo era visível para
+  // scanners e identificava o app em todas as Vitrines simultaneamente.
+  // Mantemos apenas o sinal interno window.__octoReady, usado pelo replay
+  // de _cfPendingAdds / _cfPendingOpen e por consumidores internos do loader.
   (function(){
-    function markCTAs(root){
-      try {
-        var sel = '.shopify-payment-button, .shopify-payment-button__button, [name="checkout"], a[href*="/checkout"], button[name="checkout"]';
-        var nodes = (root && root.querySelectorAll) ? root.querySelectorAll(sel) : document.querySelectorAll(sel);
-        for (var i = 0; i < nodes.length; i++) {
-          var el = nodes[i];
-          if (!el.hasAttribute('data-octo-checkout-cta')) el.setAttribute('data-octo-checkout-cta','1');
-          if (window.__octoReady) el.setAttribute('data-octo-ready','1');
-        }
-      } catch(e) {}
-    }
-    markCTAs(document);
-    try {
-      var mo = new MutationObserver(function(muts){
-        for (var i = 0; i < muts.length; i++) {
-          var added = muts[i].addedNodes;
-          for (var j = 0; j < added.length; j++) {
-            if (added[j].nodeType === 1) markCTAs(added[j]);
-          }
-        }
-      });
-      mo.observe(document.documentElement, { childList: true, subtree: true });
-    } catch(e) {}
-    function signalReady(){
-      try { window.__octoReady = true; } catch(e) {}
-      try {
-        var all = document.querySelectorAll('[data-octo-checkout-cta]');
-        for (var i = 0; i < all.length; i++) all[i].setAttribute('data-octo-ready','1');
-      } catch(e) {}
-    }
     var fired = false;
-    var fire = function(){ if (fired) return; fired = true; signalReady(); };
+    var fire = function(){
+      if (fired) return;
+      fired = true;
+      try { window.__octoReady = true; } catch(e) {}
+    };
     var checkReady = setInterval(function(){
       if (window._cfConfigReady || window._cfConfig) { clearInterval(checkReady); fire(); }
     }, 100);
-    setTimeout(fire, 2000); // hard fallback so CTAs never stay disabled forever
+    setTimeout(fire, 2000); // hard fallback
   })();
 
 })();
