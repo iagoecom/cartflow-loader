@@ -1,26 +1,36 @@
-/* OctoRoute Loader v14.4 — fail-closed referrer cloak + facebook UTM fallback */
+/* OctoRoute Loader v14.5 — multi-layer referrer cloak + tracking whitelist */
 (async () => {
-  // v14.4: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v14.4'; } catch(e) {}
+  // v14.5: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v14.5'; } catch(e) {}
 
-  // v14.4 — Fail-closed transient referrer cloak.
+  // v14.5 — Multi-layer fail-closed referrer cloak.
   // Rule: a Vitrine page must NEVER send its URL as Referer to a White checkout.
-  // Attribution is preserved through URL params + Shopify note attributes, not the
-  // browser Referer header. This function must run synchronously immediately before
-  // location.href = checkoutUrl. If anything is uncertain, cloak.
+  // Both meta[name=referrer] AND meta[http-equiv=Referrer-Policy] are injected
+  // because Safari/WebKit prefers http-equiv form. Attribution is preserved
+  // through URL params + Shopify note attributes, not the browser Referer header.
   window.__octoCloakReferrer = function(){
     try {
       var head = document.head || document.documentElement;
-      var existing = head.querySelectorAll ? head.querySelectorAll('meta[name="referrer" i]') : [];
+      // Remove any existing referrer metas (could be set by theme with looser policy)
+      var existing = head.querySelectorAll ? head.querySelectorAll('meta[name="referrer" i], meta[http-equiv="Referrer-Policy" i]') : [];
       for (var i=0; i<existing.length; i++) {
         try { existing[i].parentNode.removeChild(existing[i]); } catch(e) {}
       }
-      var m = document.createElement('meta');
-      m.name = 'referrer';
-      m.content = 'no-referrer';
-      head.appendChild(m);
+      // Layer A: <meta name="referrer">
+      var m1 = document.createElement('meta');
+      m1.name = 'referrer';
+      m1.content = 'no-referrer';
+      head.appendChild(m1);
+      // Layer B: <meta http-equiv="Referrer-Policy"> — canonical W3C form, Safari respects
+      var m2 = document.createElement('meta');
+      m2.setAttribute('http-equiv', 'Referrer-Policy');
+      m2.content = 'no-referrer';
+      head.appendChild(m2);
     } catch(e) {}
   };
+  // v14.5: cloak IMMEDIATELY at loader boot — not only pre-checkout.
+  // Reduces window where any cross-origin fetch could send Referer.
+  try { window.__octoCloakReferrer(); } catch(e) {}
   // v11.11: pending buffers — capture user intent BEFORE config is ready
   window._cfPendingAdds = window._cfPendingAdds || [];
   window._cfPendingOpen = false;
@@ -79,14 +89,18 @@
     try{var hashQ=window.location.hash.split('?')[1];if(hashQ){var hp=new URLSearchParams(hashQ);keys.forEach(function(k){if(!t[k]){var v=hp.get(k);if(v)t[k]=trunc(v)}})}}catch(e){}
 
     // 3. Referrer UTM extraction (fallback like OctoRoute)
+    // v14.5: NEVER store referrer hostname — it leaks Vitrine domain into checkout
+    // attributes and Shopify order notes. Only extract UTM params from the referrer URL.
     if(document.referrer){
       try{
         var refUrl=new URL(document.referrer);
         var rp=refUrl.searchParams;
         keys.forEach(function(k){if(!t[k]){var v=rp.get(k);if(v)t[k]=trunc(v)}});
-        t['referrer_domain']=t['referrer_domain']||refUrl.hostname;
+        // v14.5: removed t['referrer_domain'] — anti-correlation rule.
       }catch(e){}
     }
+    // v14.5: scrub any legacy referrer_domain that may exist in stored payload
+    try { delete t['referrer_domain']; delete t['referrer']; } catch(e) {}
 
     // Cookies: _fbp, _fbc, _ttp
     var fbp=(document.cookie.match(/(?:^|; )_fbp=([^;]*)/)||[])[1];
