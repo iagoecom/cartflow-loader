@@ -517,7 +517,7 @@ async function getConfig(skus) {
       _vitrineSkuMap = {};
       let page = 1;
       while (true) {
-        const res = await (window._cfOrigFetch || fetch)(`/products.json?limit=250&page=${page}`);
+        const res = await (window._cfOrigFetch || fetch)(`/products.json?limit=250&page=${page}`, { referrerPolicy: 'no-referrer' });
         const data = await res.json();
         if (!data.products || data.products.length === 0) break;
         for (const p of data.products) {
@@ -567,7 +567,7 @@ async function getConfig(skus) {
 
   async function fetchShopifyCart() {
     try {
-      const res = await (window._cfOrigFetch || fetch)('/cart.js');
+      const res = await (window._cfOrigFetch || fetch)('/cart.js', { referrerPolicy: 'no-referrer' });
       if (!res.ok) { trackEvent('error_cart_fetch', 0, { status: res.status, message: 'HTTP ' + res.status }); }
       return await res.json();
     } catch(err) {
@@ -1516,7 +1516,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         await (window._cfOrigFetch||fetch)('/cart/change.js', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({id:key,quantity:finalQty})
+          body:JSON.stringify({id:key,quantity:finalQty}),
+          referrerPolicy: 'no-referrer'
         });
         const cart = await fetchShopifyCart();
         window._lastCart = cart;
@@ -1568,7 +1569,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         const r = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: [{ id: vid, quantity: 1 }] })
+          body: JSON.stringify({ items: [{ id: vid, quantity: 1 }] }),
+          referrerPolicy: 'no-referrer'
         });
         return r.ok;
       } catch (e) { return false; }
@@ -1702,7 +1704,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         window._cfAddInFlight = true;
         await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
           method: 'POST',
-          body: formData
+          body: formData,
+          referrerPolicy: 'no-referrer'
         });
         debouncedCartRefresh(true);
       } catch(err) { console.warn('[CF] form submit error', err); }
@@ -1801,7 +1804,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
           try {
             const body = item.formData || item.body;
             if (body) {
-              (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', { method: 'POST', body: body })
+              (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', { method: 'POST', body: body, referrerPolicy: 'no-referrer' })
                 .then(function(){ try { debouncedCartRefresh(true); } catch(e) {} })
                 .catch(function(){});
             }
@@ -1905,12 +1908,21 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       }
     } catch(e) {}
   }
+  // v14.8: debounce de 15s para evitar rajada de syncs (focus/visibilitychange/interval simultâneos)
+  var _lastSyncAt = 0;
+  var SYNC_MIN_INTERVAL = 15000;
+  function _cfAutoSyncDebounced() {
+    var now = Date.now();
+    if (now - _lastSyncAt < SYNC_MIN_INTERVAL) return;
+    _lastSyncAt = now;
+    _cfAutoSync();
+  }
   document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible') _cfAutoSync();
+    if (document.visibilityState === 'visible') _cfAutoSyncDebounced();
   });
-  window.addEventListener('focus', _cfAutoSync);
+  window.addEventListener('focus', _cfAutoSyncDebounced);
   // Periodic poll every 30s while tab is visible
-  setInterval(function() { if (document.visibilityState === 'visible') _cfAutoSync(); }, 30000);
+  setInterval(function() { if (document.visibilityState === 'visible') _cfAutoSyncDebounced(); }, 30000);
 
   // ============ v14.0: READY SIGNAL ONLY ============
   // CSS gating do script-bootstrap foi removido em v14.0 (era fingerprint cruzado).
