@@ -1,7 +1,7 @@
-/* OctoRoute Loader v14.2 — selective referrer cloak (preserves ad/social attribution, hides Vitrine) */
+/* OctoRoute Loader v14.3 — selective referrer cloak + upsell vitrine variant fallback */
 (async () => {
-  // v14.2: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v14.2'; } catch(e) {}
+  // v14.3: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v14.3'; } catch(e) {}
 
   // v14.2 — Selective transient referrer cloak.
   // Goal: hide Vitrine domain from Shopify ("Visited your store from <vitrine>")
@@ -1547,14 +1547,39 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     if (window._cfConfig && Array.isArray(window._cfConfig.upsells)) {
       window._cfConfig.upsells = window._cfConfig.upsells.filter(u => u.id !== productId);
     }
-    try {
-      const res = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ id: vitrineVariantId, quantity: 1 }] })
-      });
-      if (!res.ok) { trackEvent('error_upsell_add', 0, { product_title: product.title, message: 'HTTP ' + res.status }); console.warn('[CartFlow] Failed:', await res.text()); _upsellPending = false; resetBtn(); return; }
-    } catch(e) { trackEvent('error_upsell_add', 0, { product_title: product.title, message: e.message || 'add failed' }); console.warn('[CartFlow] Add error:', e); _upsellPending = false; resetBtn(); return; }
+    // v14.3 — Helper: try /cart/add with a given variant id; returns true on success.
+    const tryAdd = async (vid) => {
+      try {
+        const r = await (window._cfOrigFetch||fetch)('/cart/add.js?_cf=1', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: [{ id: vid, quantity: 1 }] })
+        });
+        return r.ok;
+      } catch (e) { return false; }
+    };
+    let added = await tryAdd(vitrineVariantId);
+    // v14.3 — If cached shopify_variant_id failed (likely belongs to White store, not Vitrine),
+    // invalidate it and retry by resolving via Vitrine /products.json SKU map.
+    if (!added) {
+      console.warn('[CartFlow] Cached variant_id failed, retrying via Vitrine SKU map for', selectedSku);
+      try {
+        const vitrineMap = await getVitrineSkuMap();
+        const vitrineEntry = vitrineMap[selectedSku.toUpperCase()];
+        const fallbackId = vitrineEntry?.id || vitrineEntry;
+        if (fallbackId && String(fallbackId) !== String(vitrineVariantId)) {
+          added = await tryAdd(fallbackId);
+        }
+      } catch(_) {}
+    }
+    if (!added) {
+      trackEvent('error_upsell_add', 0, { product_title: product.title, message: 'add failed (vitrine variant unresolved)' });
+      // Restore upsell visibility so user can retry
+      if (window._originalUpsells && window._cfConfig) {
+        window._cfConfig.upsells = window._originalUpsells.filter(u => !_addedUpsellSkus.has((u.sku||'').toUpperCase()));
+      }
+      _upsellPending = false; resetBtn(); return;
+    }
     const cart = await fetchShopifyCart();
     window._lastCart = cart;
     if (window._cfConfig) {
