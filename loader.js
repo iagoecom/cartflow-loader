@@ -967,7 +967,118 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     }
   };
 
+  // === Product Gifts (BXGY auto-add) ===
+  // Detects trigger products in cart and auto-inserts the gift variant with
+  // properties._gift = "1". Removes gift if trigger condition no
+  // longer met. Shopify BXGY discount (already created server-side) zeroes
+  // the price at checkout. Property name kept generic to avoid fingerprint.
+  function _cfIsGiftItem(item) {
+    return !!(item && item.properties && (
+      item.properties._gift === '1' || item.properties._gift === 1 ||
+      item.properties._octoroute_gift === '1' || item.properties._octoroute_gift === 1
+    ));
+  }
+
+  async function _cfSyncGifts(cart, config) {
+    const gifts = (config && Array.isArray(config.gifts)) ? config.gifts : [];
+    if (!gifts.length) return false;
+    if (window._cfGiftSyncing) return false;
+    const items = (cart && cart.items) || [];
+
+    // Build maps: trigger product_id -> {qty, total_cents}; gift variant -> item key
+    const triggerStats = new Map();
+    const giftItemsByVariant = new Map();
+    for (const it of items) {
+      const pid = it.product_id != null ? String(it.product_id) : '';
+      const vid = it.variant_id != null ? String(it.variant_id) : '';
+      if (_cfIsGiftItem(it)) {
+        if (vid) giftItemsByVariant.set(vid, it);
+        continue;
+      }
+      if (!pid) continue;
+      const prev = triggerStats.get(pid) || { qty: 0, cents: 0 };
+      prev.qty += Number(it.quantity || 0);
+      prev.cents += Number(it.line_price != null ? it.line_price : (it.price * (it.quantity||1)));
+      triggerStats.set(pid, prev);
+    }
+
+    const toAdd = [];
+    const toRemove = [];
+    const wantedVariants = new Set();
+    for (const g of gifts) {
+      const trigPid = String(g.trigger_shopify_product_id || '');
+      const giftVid = String(g.gift_shopify_variant_id || '');
+      if (!trigPid || !giftVid) continue;
+      const stats = triggerStats.get(trigPid) || { qty: 0, cents: 0 };
+      let conditionMet = false;
+      if (g.condition_type === 'min_value') {
+        conditionMet = (stats.cents / 100) >= Number(g.condition_value || 0);
+      } else {
+        // default: min_quantity
+        conditionMet = stats.qty >= Number(g.condition_value || 1);
+      }
+      const alreadyInCart = giftItemsByVariant.has(giftVid);
+      if (conditionMet) {
+        wantedVariants.add(giftVid);
+        if (!alreadyInCart) toAdd.push(giftVid);
+      }
+    }
+    // Remove any gift in cart whose variant is no longer wanted
+    for (const [vid, it] of giftItemsByVariant.entries()) {
+      if (!wantedVariants.has(vid)) toRemove.push(it.key);
+    }
+
+    if (!toAdd.length && !toRemove.length) return false;
+
+    window._cfGiftSyncing = true;
+    window._cfAddInFlight = true;
+    try {
+      // Removes first to free slots, then adds
+      for (const key of toRemove) {
+        try {
+          await (window._cfOrigFetch || fetch)('/cart/change.js?_cf=1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: key, quantity: 0 }),
+            referrerPolicy: 'no-referrer',
+          });
+        } catch (e) {}
+      }
+      for (const vid of toAdd) {
+        try {
+          await (window._cfOrigFetch || fetch)('/cart/add.js?_cf=1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: Number(vid),
+              quantity: 1,
+              properties: { _gift: '1' },
+            }),
+            referrerPolicy: 'no-referrer',
+          });
+        } catch (e) {}
+      }
+      return true;
+    } finally {
+      setTimeout(() => { window._cfGiftSyncing = false; window._cfAddInFlight = false; }, 300);
+    }
+  }
+
   function renderCart(cart, config) {
+    // Auto-sync gifts BEFORE drawing. If mutated, refetch + re-render once.
+    try {
+      if (config && Array.isArray(config.gifts) && config.gifts.length && !window._cfGiftSyncing) {
+        _cfSyncGifts(cart, config).then(mutated => {
+          if (mutated) {
+            (window._cfOrigFetch || fetch)('/cart.js', { referrerPolicy: 'no-referrer' })
+              .then(r => r.json())
+              .then(fresh => { window._lastCart = fresh; renderCart(fresh, config); })
+              .catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {}
+
     // v11.12: preload all cart item images so swap doesn't flicker
     try {
       if (cart && cart.items && window._cfPreloadImages) {
@@ -1010,9 +1121,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     let rewardDiscount = 0;
     let activeRewardLabels = [];
     const _excludeUpsells = v.exclude_upsells_from_discount === true;
-    const _rawSubtotalCentsAll = items.reduce((a,i) => a + i.price * i.quantity, 0);
+    const _rawSubtotalCentsAll = items.reduce((a,i) => _cfIsGiftItem(i) ? a : a + i.price * i.quantity, 0);
     const discountableSubtotalCents = _excludeUpsells
-      ? items.reduce((a,i) => _addedUpsellSkus.has(i.sku) ? a : a + i.price * i.quantity, 0)
+      ? items.reduce((a,i) => (_cfIsGiftItem(i) || _addedUpsellSkus.has(i.sku)) ? a : a + i.price * i.quantity, 0)
       : _rawSubtotalCentsAll;
     const discountableSubtotal = discountableSubtotalCents / 100;
     if (rwEl) {
@@ -1108,8 +1219,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const hasCompareDiscount = lineCompareDollars > lineTotalDollars;
           const hasRewardDiscount = !isExcludedUpsell && itemRewardDiscount > 0;
           const hasDis = hasCompareDiscount || hasRewardDiscount;
-          const displayPrice = hasRewardDiscount ? discountedTotal : lineTotalDollars;
-          const totalSavingsItem = lineCompareDollars - displayPrice;
+          const isGift = _cfIsGiftItem(item);
+          const displayPrice = isGift ? 0 : (hasRewardDiscount ? discountedTotal : lineTotalDollars);
+          const totalSavingsItem = isGift ? 0 : (lineCompareDollars - displayPrice);
           const productTitle = item.product_title || item.title;
           let variantLabel = '';
           if (item.options_with_values && item.options_with_values.length > 0) {
@@ -1140,29 +1252,40 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
           } else {
             const div = document.createElement('div');
+            const giftBadge = isGift ? `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;background:${v.savings_color||'#22c55e'};color:#fff;flex-shrink:0;margin-left:6px;">FREE GIFT</span>` : '';
+            const delHtml = isGift
+              ? ''
+              : `<span data-cf-del role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>`;
+            const qtyControlsHtml = isGift
+              ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border:1px solid rgba(0,0,0,0.15);border-radius:6px;font-size:${fs(12)}px;font-weight:600;color:inherit;opacity:0.75;">Qty 1</span>`
+              : `<div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
+                    <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
+                    <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
+                    <span data-cf-plus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
+                  </div>`;
+            const priceHtml = isGift
+              ? `<span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;${v.show_strikethrough && lineCompareDollars > 0 ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
+                 <span data-cf-price style="font-size:${fs(15)}px;font-weight:700;color:${v.savings_color||'#22c55e'}">FREE</span>`
+              : `<span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;${v.show_strikethrough && hasDis ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
+                 <span data-cf-price style="font-size:${fs(15)}px;font-weight:700">${formatPriceDollars(displayPrice)}</span>
+                 <span data-cf-save style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};${v.show_strikethrough && totalSavingsItem > 0.01 ? '' : 'display:none'}">(Save ${formatPriceDollars(totalSavingsItem)})</span>`;
             div.innerHTML = `
-            <div data-cf-item-key="${item.key}" style="display:flex;align-items:center;gap:12px;padding:16px;${borderBottom}">
-              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
+            <div data-cf-item-key="${item.key}" data-cf-gift="${isGift?'1':'0'}" style="display:flex;align-items:center;gap:12px;padding:16px;${borderBottom}">
+              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center;position:relative;">
                 <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high" />
               </div>
               <div style="flex:1;min-width:0">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                  <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
-                  <span data-cf-del role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>
+                  <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}${giftBadge}</p>
+                  ${delHtml}
                 </div>
                 ${variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0 0 2px 0">${variantLabel}</p>` : ''}
                 <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
-                  <span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;${v.show_strikethrough && hasDis ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
-                  <span data-cf-price style="font-size:${fs(15)}px;font-weight:700">${formatPriceDollars(displayPrice)}</span>
-                  <span data-cf-save style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};${v.show_strikethrough && totalSavingsItem > 0.01 ? '' : 'display:none'}">(Save ${formatPriceDollars(totalSavingsItem)})</span>
+                  ${priceHtml}
                 </div>
                 <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
-                  <div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
-                    <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
-                    <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
-                    <span data-cf-plus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
-                  </div>
-                  <span data-cf-reward-tag style="display:${hasRewardDiscount && activeRewardLabels.length > 0 ? 'inline-flex' : 'none'};align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${v.text_color || '#1a1a1a'};">${activeRewardLabels.length > 0 ? activeRewardLabels[activeRewardLabels.length - 1] : ''}</span>
+                  ${qtyControlsHtml}
+                  <span data-cf-reward-tag style="display:${!isGift && hasRewardDiscount && activeRewardLabels.length > 0 ? 'inline-flex' : 'none'};align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${v.text_color || '#1a1a1a'};">${activeRewardLabels.length > 0 ? activeRewardLabels[activeRewardLabels.length - 1] : ''}</span>
                 </div>
                </div>
             </div>`;
@@ -1306,7 +1429,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       }
     }
 
-    const rawSubtotalCents = items.reduce((a,i) => a + i.price * i.quantity, 0);
+    const rawSubtotalCents = items.reduce((a,i) => _cfIsGiftItem(i) ? a : a + i.price * i.quantity, 0);
     const rawSubtotalDollars = rawSubtotalCents / 100;
     const upsellTotalDollars = _excludeUpsells
       ? items.reduce((a,i) => _addedUpsellSkus.has(i.sku) ? a + i.price * i.quantity : a, 0) / 100
