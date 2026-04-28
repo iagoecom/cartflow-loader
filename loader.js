@@ -1,7 +1,7 @@
-/* OctoRoute Loader v14.6 — multi-layer referrer cloak + tracking whitelist + scrub */
+/* OctoRoute Loader v14.7 — referrer cloak + tracking whitelist + scrub + no-fingerprint */
 (async () => {
-  // v14.6: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v14.6'; } catch(e) {}
+  // v14.7: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v14.7'; } catch(e) {}
 
   // v14.5 — Multi-layer fail-closed referrer cloak.
   // Rule: a Vitrine page must NEVER send its URL as Referer to a White checkout.
@@ -125,7 +125,7 @@
     // Triple-layer persist
     var json=JSON.stringify(t);
     try{localStorage.setItem('_octo_tracking',json)}catch(e){}
-    try{document.cookie='_octo_tracking='+encodeURIComponent(json)+';path=/;max-age=2592000;SameSite=Lax'}catch(e){}
+    try{document.cookie='_octo_tracking='+encodeURIComponent(json)+';path=/;max-age=2592000;SameSite=Lax;Secure'}catch(e){}
     try{sessionStorage.setItem('_octo_tracking',json)}catch(e){}
   })();
 
@@ -241,7 +241,8 @@
   // --- Page view tracking (1x per session) ---
   try {
     if (!sessionStorage.getItem('_octo_pv')) {
-      trackEvent('page_view', 0, { pathname: window.location.pathname, referrer: document.referrer || '', visitor_id: window.__octoVid || null }); // v13
+      // v14.7: never log raw document.referrer (could leak full URL of external sites)
+      trackEvent('page_view', 0, { pathname: window.location.pathname, visitor_id: window.__octoVid || null });
       sessionStorage.setItem('_octo_pv', '1');
     }
   } catch(e) {}
@@ -436,7 +437,7 @@
     try {
       const cached = getCachedConfig();
       const cachedVersion = cached?.version || null;
-      const r = await fetch(`${API_URL}?token=${TOKEN}&probe=1`, { cache: 'no-store' });
+      const r = await fetch(`${API_URL}?token=${TOKEN}&probe=1`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (!r.ok) return null;
       const fresh = await r.json();
       if (!fresh) return null;
@@ -458,7 +459,7 @@ async function getConfig(skus) {
       // Background refresh if stale
       if (!isCacheFresh()) {
         // NEW v11.7: bypass HTTP cache on background refresh
-        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { cache: 'no-store' })
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' })
           .then(r => r.ok ? r.json() : null)
           .then(fresh => {
             if (fresh) {
@@ -490,7 +491,7 @@ async function getConfig(skus) {
         _gwActive = parsed.visual?.gw_pre_checked || false;
         _storeCurrency = parsed.visual?.store_currency || 'USD';
         setCachedConfig(parsed);
-        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`)
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { referrerPolicy: 'no-referrer', credentials: 'omit' })
           .then(r => r.ok ? r.json() : null)
           .then(fresh => { if (fresh) { setCachedConfig(fresh); sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh)); window._cfConfig = fresh; _spActive = fresh.visual?.sp_pre_checked || false; _gwActive = fresh.visual?.gw_pre_checked || false; _storeCurrency = fresh.visual?.store_currency || 'USD'; } }).catch(()=>{});
         return parsed;
@@ -498,7 +499,7 @@ async function getConfig(skus) {
     } catch(e) {}
     // Fresh fetch
     try {
-      const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`);
+      const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (!r.ok) { trackEvent('error_config_load', 0, { status: r.status, message: 'HTTP ' + r.status }); return null; }
       const data = await r.json();
       setCachedConfig(data);
@@ -548,7 +549,7 @@ async function getConfig(skus) {
     if (skus === _lastSkus) return;
     _lastSkus = skus;
     try {
-      const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`);
+      const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`, { referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (r.ok) {
         const data = await r.json();
         if (window._cfConfig) {
@@ -1426,7 +1427,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
             signal: ctrl.signal,
-            keepalive: true
+            keepalive: true,
+            referrerPolicy: 'no-referrer',
+            credentials: 'omit'
           });
           clearTimeout(to);
           if (res.ok) return true;
@@ -1456,15 +1459,10 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     // cart_token + customer_email Dual-Mode in shopify-webhook.
     if (bestCoupon?.shopify_coupon) checkoutUrl += "&discount=" + encodeURIComponent(bestCoupon.shopify_coupon);
 
-    // v14.4: if no real ad/source attribution exists, add a safe Facebook-like
-    // UTM fallback so Shopify does not classify the White checkout as Vitrine/direct.
-    // Real fbclid/gclid/ttclid/UTMs always win and are never overwritten.
-    var hasRealSource = !!(cleanTracking.utm_source || cleanTracking.fbclid || cleanTracking.gclid || cleanTracking.ttclid || cleanTracking.msclkid);
-    if (!hasRealSource) {
-      checkoutUrl += sep + "utm_source=facebook"; sep = "&";
-      checkoutUrl += sep + "utm_medium=paid_social"; sep = "&";
-      checkoutUrl += sep + "utm_campaign=octoroute_checkout"; sep = "&";
-    }
+    // v14.7: removed UTM fallback entirely. Any fixed string (e.g. utm_campaign=octoroute_checkout)
+    // becomes a fingerprint identifying the system across White stores. If no real source exists,
+    // let Shopify classify as "direct" — that is innocent traffic, indistinguishable from a
+    // customer typing the URL. No fallback is safer than any traceable fallback.
 
     // v14.0: removed top-level &fbclid / &ttclid duplicates — already in attributes[...] above.
     return checkoutUrl;
@@ -1851,7 +1849,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
       addon_total: window._cfAddonTotal || 0,
       upsell_total: window._cfUpsellTotal || 0
     });
-    console.log('[CartFlow] ✓ Loaded v11.11 (interceptors-first + pending buffer + iOS scroll lock)');
+    // v14.7: removed production console.log (was leaking outdated version string)
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
 
@@ -1860,7 +1858,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     try { localStorage.removeItem(CONFIG_CACHE_KEY); } catch(e) {}
     try { sessionStorage.removeItem(`cf_config_${TOKEN}`); } catch(e) {}
     try {
-      const r = await fetch(`${API_URL}?token=${TOKEN}`, { cache: 'no-store' });
+      const r = await fetch(`${API_URL}?token=${TOKEN}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (!r.ok) return;
       const fresh = await r.json();
       if (!fresh) return;
@@ -1873,6 +1871,8 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     } catch(e) {}
   };
   window.addEventListener('message', function(ev) {
+    // v14.7: same-origin only — prevents third-party iframes from triggering hot-reload
+    try { if (ev.origin !== window.location.origin) return; } catch(e) { return; }
     if (ev?.data === '__octo_hot_reload__') window._cfHotReload();
   });
 
@@ -1883,7 +1883,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   async function _cfAutoSync() {
     try {
       const cached = getCachedConfig();
-      const r = await fetch(`${API_URL}?token=${TOKEN}`, { cache: 'no-store' });
+      const r = await fetch(`${API_URL}?token=${TOKEN}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (!r.ok) return;
       const fresh = await r.json();
       if (!fresh) return;
@@ -1898,7 +1898,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
         _storeCurrency = fresh.visual?.store_currency || 'USD';
         try { document.getElementById('cartflow-styles')?.remove(); injectStyles(fresh.visual||{}); } catch(e) {}
         try { if (window._lastCart) renderCart(window._lastCart, fresh); } catch(e) {}
-        console.log('[CartFlow] ⟳ Auto-sync: config updated to v' + fv);
+        // v14.7: removed production console.log
       } else if (!cv && fv) {
         // First seed of version
         setCachedConfig(fresh);
