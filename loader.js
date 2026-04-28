@@ -406,6 +406,30 @@
   // NEW v11.7: TTL reduzido 5min -> 30s; também invalida por `version` (visual_config.updated_at)
   const CONFIG_CACHE_KEY = `cf_config_${TOKEN}`;
   const CONFIG_CACHE_TTL = 30 * 1000; // NEW v11.7: 30 seconds (was 5 minutes)
+  const GIFT_VARIANTS_CACHE_KEY = `cf_gift_variants_${TOKEN}`;
+
+  function _cfReadKnownGiftVariants() {
+    try {
+      const raw = localStorage.getItem(GIFT_VARIANTS_CACHE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr.map(String).filter(Boolean) : []);
+    } catch(e) { return new Set(); }
+  }
+
+  function _cfWriteKnownGiftVariants(set) {
+    try { localStorage.setItem(GIFT_VARIANTS_CACHE_KEY, JSON.stringify([...set].filter(Boolean))); } catch(e) {}
+  }
+
+  function _cfRememberGiftVariants(gifts) {
+    try {
+      const known = _cfReadKnownGiftVariants();
+      (Array.isArray(gifts) ? gifts : []).forEach(g => {
+        const vid = String(g && g.gift_shopify_variant_id || '');
+        if (vid) known.add(vid);
+      });
+      _cfWriteKnownGiftVariants(known);
+    } catch(e) {}
+  }
 
   function getCachedConfig() {
     try {
@@ -972,26 +996,35 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   // properties._gift = "1". Removes gift if trigger condition no
   // longer met. Shopify BXGY discount (already created server-side) zeroes
   // the price at checkout. Property name kept generic to avoid fingerprint.
+  function _cfGetGiftConfigByVariant(item, config) {
+    try {
+      const cfg = config || window._cfConfig;
+      const gifts = (cfg && Array.isArray(cfg.gifts)) ? cfg.gifts : [];
+      if (!gifts.length || !item) return null;
+      const vid = String(item.variant_id || item.id || '');
+      return gifts.find(g => String(g.gift_shopify_variant_id || '') === vid) || null;
+    } catch(e) { return null; }
+  }
+
   function _cfIsGiftItem(item, config) {
     // Primary: property flag
     if (item && item.properties && (
       item.properties._gift === '1' || item.properties._gift === 1 ||
       item.properties._octoroute_gift === '1' || item.properties._octoroute_gift === 1
     )) return true;
-    // Fallback: variant_id matches a configured gift (Shopify themes/apps may strip _ properties)
     try {
-      const cfg = config || window._cfConfig;
-      const gifts = (cfg && Array.isArray(cfg.gifts)) ? cfg.gifts : [];
-      if (!gifts.length || !item) return false;
+      if (!item) return false;
       const vid = String(item.variant_id || item.id || '');
       if (!vid) return false;
-      return gifts.some(g => String(g.gift_shopify_variant_id || '') === vid);
+      if (_cfGetGiftConfigByVariant(item, config)) return true;
+      // Last-known fallback lets the loader remove stale gifts after a promotion is disabled.
+      return _cfReadKnownGiftVariants().has(vid);
     } catch(e) { return false; }
   }
 
   async function _cfSyncGifts(cart, config) {
     const gifts = (config && Array.isArray(config.gifts)) ? config.gifts : [];
-    if (!gifts.length) return false;
+    if (gifts.length) _cfRememberGiftVariants(gifts);
     if (window._cfGiftSyncing) return false;
     const items = (cart && cart.items) || [];
 
@@ -1001,7 +1034,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     for (const it of items) {
       const pid = it.product_id != null ? String(it.product_id) : '';
       const vid = it.variant_id != null ? String(it.variant_id) : '';
-      if (_cfIsGiftItem(it)) {
+      if (_cfIsGiftItem(it, config)) {
         if (vid) giftItemsByVariant.set(vid, it);
         continue;
       }
@@ -1010,6 +1043,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       prev.qty += Number(it.quantity || 0);
       prev.cents += Number(it.line_price != null ? it.line_price : (it.price * (it.quantity||1)));
       triggerStats.set(pid, prev);
+    }
+
+    if (!gifts.length && giftItemsByVariant.size === 0) {
+      _cfWriteKnownGiftVariants(new Set());
+      return false;
     }
 
     const toAdd = [];
@@ -1021,7 +1059,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if (!trigPid || !giftVid) continue;
       const stats = triggerStats.get(trigPid) || { qty: 0, cents: 0 };
       let conditionMet = false;
-      if (g.condition_type === 'min_value') {
+      if (g.condition_type === 'min_value' || g.condition_type === 'min_amount') {
         conditionMet = (stats.cents / 100) >= Number(g.condition_value || 0);
       } else {
         // default: min_quantity
@@ -1033,7 +1071,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         if (!alreadyInCart) toAdd.push(giftVid);
       }
     }
-    // Remove any gift in cart whose variant is no longer wanted
+    // Remove any gift in cart whose variant is no longer wanted or whose rule was disabled.
     for (const [vid, it] of giftItemsByVariant.entries()) {
       if (!wantedVariants.has(vid)) toRemove.push(it.key);
     }
@@ -1068,6 +1106,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           });
         } catch (e) {}
       }
+      if (!gifts.length) _cfWriteKnownGiftVariants(new Set());
       return true;
     } finally {
       setTimeout(() => { window._cfGiftSyncing = false; window._cfAddInFlight = false; }, 300);
@@ -1077,7 +1116,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   function renderCart(cart, config) {
     // Auto-sync gifts BEFORE drawing. If mutated, refetch + re-render once.
     try {
-      if (config && Array.isArray(config.gifts) && config.gifts.length && !window._cfGiftSyncing) {
+      if (config && !window._cfGiftSyncing) {
         _cfSyncGifts(cart, config).then(mutated => {
           if (mutated) {
             (window._cfOrigFetch || fetch)('/cart.js', { referrerPolicy: 'no-referrer' })
@@ -1098,7 +1137,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     } catch(e) {}
     const v = config.visual || {};
     const items = cart.items || [];
-    const count = items.reduce((a,i) => a + i.quantity, 0);
+    const count = items.reduce((a,i) => _cfIsGiftItem(i, config) ? a : a + i.quantity, 0);
     const accentColor = v.accent_color || '#f6f6f7';
     const accentTextColor = contrastText(accentColor);
     _fontScale = SCALE_MAP[v.font_scale] || 1.15;
@@ -1131,22 +1170,21 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     let rewardDiscount = 0;
     let activeRewardLabels = [];
     const _excludeUpsells = v.exclude_upsells_from_discount === true;
-    const _rawSubtotalCentsAll = items.reduce((a,i) => _cfIsGiftItem(i) ? a : a + i.price * i.quantity, 0);
-    const discountableSubtotalCents = _excludeUpsells
-      ? items.reduce((a,i) => (_cfIsGiftItem(i) || _addedUpsellSkus.has(i.sku)) ? a : a + i.price * i.quantity, 0)
-      : _rawSubtotalCentsAll;
+    const rewardEligibleItems = items.filter(i => !_cfIsGiftItem(i, config) && (!_excludeUpsells || !_addedUpsellSkus.has(i.sku)));
+    const _rawSubtotalCentsAll = items.reduce((a,i) => _cfIsGiftItem(i, config) ? a : a + i.price * i.quantity, 0);
+    const discountableSubtotalCents = rewardEligibleItems.reduce((a,i) => a + i.price * i.quantity, 0);
     const discountableSubtotal = discountableSubtotalCents / 100;
     if (rwEl) {
       rwEl.innerHTML = '';
       if (v.rewards_enabled && tiers.length > 0 && (count > 0 || showOnEmpty)) {
         const isQty = (v.rewards_calculation||'cart_total') === 'quantity';
-        const totalQty = count;
-        const totalValue = cart.total_price / 100;
+        const totalQty = rewardEligibleItems.reduce((a,i) => a + Number(i.quantity || 0), 0);
+        const totalValue = discountableSubtotal;
         const simValue = Number(isQty ? totalQty : totalValue)||0;
         const sorted = [...tiers].sort((a,b) => (Number(a.minimum_value)||0) - (Number(b.minimum_value)||0));
         const rawSubtotalCents = _rawSubtotalCentsAll;
         const rawSubtotal = rawSubtotalCents / 100;
-        const cheapestPrice = items.length > 0 ? Math.min(...items.map(i => i.price)) / 100 : 0;
+        const cheapestPrice = rewardEligibleItems.length > 0 ? Math.min(...rewardEligibleItems.map(i => i.price)) / 100 : 0;
         const unlockedTiers = sorted.filter(t => simValue >= (parseFloat(t.minimum_value)||0));
         const byType = new Map();
         for (const tier of unlockedTiers) {
@@ -1217,19 +1255,22 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         items.forEach((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
+          const isGift = _cfIsGiftItem(item, config);
+          const giftCfg = isGift ? _cfGetGiftConfigByVariant(item, config) : null;
           const vitrineEntry = _vitrineSkuMap?.[item.sku?.toUpperCase()];
-          const compareAtPriceDollars = vitrineEntry?.compare_at_price ? vitrineEntry.compare_at_price * item.quantity : null;
+          const compareAtPriceDollars = !isGift && vitrineEntry?.compare_at_price ? vitrineEntry.compare_at_price * item.quantity : null;
           const shopifyOrigCents = item.original_price || item.price;
           const shopifyOrigDollars = shopifyOrigCents * item.quantity / 100;
-          const lineCompareDollars = compareAtPriceDollars || shopifyOrigDollars;
+          const giftUnitPriceDollars = Number(giftCfg?.gift_price || 0) || (item.price ? item.price / 100 : 0) || (item.original_price ? item.original_price / 100 : 0);
+          const giftValueDollars = giftUnitPriceDollars * item.quantity;
+          const lineCompareDollars = isGift ? giftValueDollars : (compareAtPriceDollars || shopifyOrigDollars);
           const isExcludedUpsell = _excludeUpsells && _addedUpsellSkus.has(item.sku);
-          const itemShare = isExcludedUpsell ? 0 : (discSubDollars > 0 ? lineTotalDollars / discSubDollars : 0);
-          const itemRewardDiscount = isExcludedUpsell ? 0 : rewardDiscount * itemShare;
+          const itemShare = (isGift || isExcludedUpsell) ? 0 : (discSubDollars > 0 ? lineTotalDollars / discSubDollars : 0);
+          const itemRewardDiscount = (isGift || isExcludedUpsell) ? 0 : rewardDiscount * itemShare;
           const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
           const hasCompareDiscount = lineCompareDollars > lineTotalDollars;
-          const hasRewardDiscount = !isExcludedUpsell && itemRewardDiscount > 0;
+          const hasRewardDiscount = !isGift && !isExcludedUpsell && itemRewardDiscount > 0;
           const hasDis = hasCompareDiscount || hasRewardDiscount;
-          const isGift = _cfIsGiftItem(item, config);
           const displayPrice = isGift ? 0 : (hasRewardDiscount ? discountedTotal : lineTotalDollars);
           const totalSavingsItem = isGift ? 0 : (lineCompareDollars - displayPrice);
           const productTitle = item.product_title || item.title;
@@ -1241,14 +1282,21 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             variantLabel = item.variant_title;
           }
           const borderBottom = idx < items.length-1 ? 'border-bottom:1px solid rgba(0,0,0,0.08);' : '';
-          const existing = itemsEl.querySelector(`[data-cf-item-key="${item.key}"]`);
+          let existing = itemsEl.querySelector(`[data-cf-item-key="${item.key}"]`);
+          if (existing && existing.getAttribute('data-cf-gift') !== (isGift ? '1' : '0')) {
+            existing.remove();
+            existing = null;
+          }
           if (existing) {
             const qtyEl = existing.querySelector('[data-cf-qty]');
             if (qtyEl) qtyEl.textContent = item.quantity;
             const priceEl = existing.querySelector('[data-cf-price]');
-            if (priceEl) priceEl.textContent = formatPriceDollars(displayPrice);
+            if (priceEl) {
+              priceEl.textContent = isGift ? 'FREE' : formatPriceDollars(displayPrice);
+              if (isGift) priceEl.style.color = v.savings_color || '#22c55e';
+            }
             const strikeEl = existing.querySelector('[data-cf-strike]');
-            if (strikeEl) { if (v.show_strikethrough && hasDis) { strikeEl.textContent = formatPriceDollars(lineCompareDollars); strikeEl.style.display = ''; } else { strikeEl.style.display = 'none'; } }
+            if (strikeEl) { if (v.show_strikethrough && (hasDis || (isGift && lineCompareDollars > 0))) { strikeEl.textContent = formatPriceDollars(lineCompareDollars); strikeEl.style.display = ''; } else { strikeEl.style.display = 'none'; } }
             const saveEl = existing.querySelector('[data-cf-save]');
             if (saveEl) { if (v.show_strikethrough && totalSavingsItem > 0.01) { saveEl.textContent = `Save ${formatPriceDollars(totalSavingsItem)}`; saveEl.style.display = ''; } else { saveEl.style.display = 'none'; } }
             const minusBtn = existing.querySelector('[data-cf-minus]');
@@ -1260,39 +1308,39 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             const tagEl = existing.querySelector('[data-cf-reward-tag]');
             if (tagEl) { const lastLabel = activeRewardLabels[activeRewardLabels.length - 1] || ''; if (hasRewardDiscount && lastLabel) { tagEl.textContent = lastLabel; tagEl.style.display = 'inline-flex'; } else { tagEl.style.display = 'none'; } }
             existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
-          } else {
-            const div = document.createElement('div');
-            const giftSubtitleHtml = isGift ? `<p style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};margin:2px 0 0 0;display:flex;align-items:center;gap:4px;"><span style="display:inline-flex;width:12px;height:12px;flex-shrink:0;">${SVG_ICONS.gift}</span>Free gift${lineCompareDollars > 0 ? ` \u2022 You saved ${formatPriceDollars(lineCompareDollars)}` : ''}</p>` : '';
-            const delHtml = isGift
+           } else {
+             const div = document.createElement('div');
+             const giftSubtitleHtml = isGift ? `<p style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};margin:2px 0 0 0;display:flex;align-items:center;gap:4px;"><span style="display:inline-flex;width:12px;height:12px;flex-shrink:0;">${SVG_ICONS.gift}</span>Free gift${lineCompareDollars > 0 ? ` • You saved ${formatPriceDollars(lineCompareDollars)}` : ''}</p>` : '';
+             const delHtml = isGift
               ? ''
               : `<span data-cf-del role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>`;
-            const qtyControlsHtml = isGift
-              ? ''
+             const qtyControlsHtml = isGift
+               ? ''
               : `<div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
                     <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
                     <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
                     <span data-cf-plus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity+1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.plus}</span>
                   </div>`;
-            const priceHtml = isGift
-              ? `<span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;${v.show_strikethrough && lineCompareDollars > 0 ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
-                 <span data-cf-price style="font-size:${fs(15)}px;font-weight:700;color:${v.savings_color||'#22c55e'}">FREE</span>`
-              : `<span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;${v.show_strikethrough && hasDis ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
-                 <span data-cf-price style="font-size:${fs(15)}px;font-weight:700">${formatPriceDollars(displayPrice)}</span>
-                 <span data-cf-save style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};${v.show_strikethrough && totalSavingsItem > 0.01 ? '' : 'display:none'}">(Save ${formatPriceDollars(totalSavingsItem)})</span>`;
-            div.innerHTML = `
-            <div data-cf-item-key="${item.key}" data-cf-gift="${isGift?'1':'0'}" style="display:flex;align-items:center;gap:12px;padding:16px;${borderBottom}">
-              <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center;position:relative;">
-                <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high" />
-              </div>
-              <div style="flex:1;min-width:0">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                  <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
-                  ${delHtml}
-                </div>
-                ${isGift ? giftSubtitleHtml : (variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0 0 2px 0">${variantLabel}</p>` : '')}
-                <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
-                  ${priceHtml}
-                </div>
+             const priceHtml = isGift
+               ? `<span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;${v.show_strikethrough && lineCompareDollars > 0 ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
+                  <span data-cf-price style="font-size:${fs(15)}px;font-weight:700;color:${v.savings_color||'#22c55e'}">FREE</span>`
+               : `<span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;${v.show_strikethrough && hasDis ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
+                  <span data-cf-price style="font-size:${fs(15)}px;font-weight:700">${formatPriceDollars(displayPrice)}</span>
+                  <span data-cf-save style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};${v.show_strikethrough && totalSavingsItem > 0.01 ? '' : 'display:none'}">(Save ${formatPriceDollars(totalSavingsItem)})</span>`;
+             div.innerHTML = `
+             <div data-cf-item-key="${item.key}" data-cf-gift="${isGift?'1':'0'}" style="display:flex;align-items:center;gap:12px;padding:16px;${borderBottom}">
+               <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center;position:relative;">
+                 <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high" />
+               </div>
+               <div style="flex:1;min-width:0">
+                 <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                   <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
+                   ${delHtml}
+                 </div>
+                 ${isGift ? giftSubtitleHtml : (variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0 0 2px 0">${variantLabel}</p>` : '')}
+                 <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
+                   ${priceHtml}
+                 </div>
                 <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
                   ${qtyControlsHtml}
                   <span data-cf-reward-tag style="display:${!isGift && hasRewardDiscount && activeRewardLabels.length > 0 ? 'inline-flex' : 'none'};align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${v.text_color || '#1a1a1a'};">${activeRewardLabels.length > 0 ? activeRewardLabels[activeRewardLabels.length - 1] : ''}</span>
@@ -1439,7 +1487,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       }
     }
 
-    const rawSubtotalCents = items.reduce((a,i) => _cfIsGiftItem(i) ? a : a + i.price * i.quantity, 0);
+    const rawSubtotalCents = items.reduce((a,i) => _cfIsGiftItem(i, config) ? a : a + i.price * i.quantity, 0);
     const rawSubtotalDollars = rawSubtotalCents / 100;
     const upsellTotalDollars = _excludeUpsells
       ? items.reduce((a,i) => _addedUpsellSkus.has(i.sku) ? a + i.price * i.quantity : a, 0) / 100
@@ -1502,7 +1550,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(",")}`;
     const tiers = config.rewards || [];
     const isQty = (v.rewards_calculation||"cart_total") === "quantity";
-    const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
+    const rewardCheckoutItems = cartItems.filter(i => !_cfIsGiftItem(i, config) && (!(v.exclude_upsells_from_discount === true) || !_addedUpsellSkus.has(i.sku)));
+    const simValue = isQty ? rewardCheckoutItems.reduce((a,i) => a+i.quantity, 0) : rewardCheckoutItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
     // v14.6: Shopify-standard 10 attribution keys (6 UTMs + 4 click IDs).
