@@ -1252,7 +1252,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
           } else {
             const div = document.createElement('div');
-            const giftBadge = isGift ? `<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;background:${v.savings_color||'#22c55e'};color:#fff;flex-shrink:0;margin-left:6px;">FREE GIFT</span>` : '';
+            const giftSubtitleHtml = isGift ? `<p style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};margin:2px 0 0 0;display:flex;align-items:center;gap:4px;"><span style="display:inline-flex;width:12px;height:12px;flex-shrink:0;">${SVG_ICONS.gift}</span>Free gift${lineCompareDollars > 0 ? ` \u2022 You saved ${formatPriceDollars(lineCompareDollars)}` : ''}</p>` : '';
             const delHtml = isGift
               ? ''
               : `<span data-cf-del role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>`;
@@ -1276,10 +1276,10 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
               </div>
               <div style="flex:1;min-width:0">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                  <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}${giftBadge}</p>
+                  <p style="font-size:${fs(15)}px;font-weight:600;margin:0;word-break:break-word;white-space:normal;flex:1;min-width:0;padding-right:8px">${productTitle}</p>
                   ${delHtml}
                 </div>
-                ${variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0 0 2px 0">${variantLabel}</p>` : ''}
+                ${isGift ? giftSubtitleHtml : (variantLabel ? `<p style="font-size:${fs(12)}px;opacity:0.6;margin:0 0 2px 0">${variantLabel}</p>` : '')}
                 <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
                   ${priceHtml}
                 </div>
