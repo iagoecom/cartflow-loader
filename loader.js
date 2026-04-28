@@ -1,59 +1,7 @@
-/* OctoRoute Loader v14.2 — selective referrer cloak (preserves ad/social attribution, hides Vitrine) */
+/* OctoRoute Loader v13.0 — attribution recovery (HTTP-only vid mirror + CTA gating + page_view visitor_id) */
 (async () => {
-  // v14.2: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v14.2'; } catch(e) {}
-
-  // v14.2 — Selective transient referrer cloak.
-  // Goal: hide Vitrine domain from Shopify ("Visited your store from <vitrine>")
-  // WITHOUT killing legit ad/social attribution (Facebook, Google, TikTok, etc.).
-  // Logic: if document.referrer hostname matches a known ad/social platform,
-  // SKIP the cloak — let the Referer header through so Shopify shows
-  // "Visited your store from Facebook/Instagram/Google/...". Otherwise
-  // (Vitrine, unknown referrers, direct traffic) inject meta no-referrer
-  // synchronously before location.href = checkoutUrl.
-  // Meta exists for ~50ms (until unload) — no cross-store DOM fingerprint.
-  // CRITICAL: must be called synchronously immediately before location.href.
-  window.__octoCloakReferrer = function(){
-    try {
-      // Whitelist: legit traffic sources Shopify SHOULD see
-      var SAFE_REFERRERS = [
-        'facebook.com','fb.com','fb.me','l.facebook.com','lm.facebook.com','m.facebook.com',
-        'instagram.com','l.instagram.com',
-        'google.com','google.','googleadservices.com','googlesyndication.com','doubleclick.net','googleusercontent.com',
-        'tiktok.com','bytedance.com','musical.ly',
-        'youtube.com','youtu.be',
-        't.co','twitter.com','x.com',
-        'bing.com','duckduckgo.com',
-        'pinterest.com','pin.it',
-        'snapchat.com','sc-cdn.net',
-        'linkedin.com','lnkd.in',
-        'reddit.com','out.reddit.com',
-        'whatsapp.com','wa.me','api.whatsapp.com',
-        'messenger.com','m.me',
-        'kwai.com','kwai-app.com'
-      ];
-      var ref = '';
-      try { ref = document.referrer || ''; } catch(e) {}
-      var refHost = '';
-      try { refHost = ref ? new URL(ref).hostname.toLowerCase() : ''; } catch(e) {}
-
-      // If referrer is a known ad/social platform → DO NOT cloak.
-      // Shopify will display the real source (Facebook/Instagram/Google/etc).
-      if (refHost) {
-        for (var s=0; s<SAFE_REFERRERS.length; s++) {
-          if (refHost.indexOf(SAFE_REFERRERS[s]) !== -1) return;
-        }
-      }
-
-      // Otherwise (Vitrine domain, unknown referrer, or none) → cloak.
-      var existing = document.head.querySelectorAll('meta[name="referrer" i]');
-      for (var i=0; i<existing.length; i++) existing[i].parentNode.removeChild(existing[i]);
-      var m = document.createElement('meta');
-      m.name = 'referrer';
-      m.content = 'no-referrer';
-      document.head.appendChild(m);
-    } catch(e) {}
-  };
+  // v11.12: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v13.0'; } catch(e) {}
   // v11.11: pending buffers — capture user intent BEFORE config is ready
   window._cfPendingAdds = window._cfPendingAdds || [];
   window._cfPendingOpen = false;
@@ -111,7 +59,7 @@
     // 2. Hash params (e.g. #?utm_source=...)
     try{var hashQ=window.location.hash.split('?')[1];if(hashQ){var hp=new URLSearchParams(hashQ);keys.forEach(function(k){if(!t[k]){var v=hp.get(k);if(v)t[k]=trunc(v)}})}}catch(e){}
 
-    // 3. Referrer UTM extraction (fallback like OctoRoute)
+    // 3. Referrer UTM extraction (fallback like HeroCart)
     if(document.referrer){
       try{
         var refUrl=new URL(document.referrer);
@@ -1368,7 +1316,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-    var trackingKeys = ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","fbclid","gclid","ttclid"];
+    var trackingKeys = ["fbclid","ttclid","gclid","utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","wbraid","gbraid","tikclid","irclickid","msclkid","li_fat_id","twclid","sccid","epik","_fbp","_fbc","ttp"];
     var storedTracking = {};
     try { storedTracking = JSON.parse(localStorage.getItem("_octo_tracking") || "{}"); } catch(e) {}
     if (!Object.keys(storedTracking).length) {
@@ -1386,7 +1334,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       var val = mergedTracking[k] || null;
       if (val) cleanTracking[k] = String(val).substring(0, 200);
     });
-    cleanTracking["source"] = "web";
+    cleanTracking["source"] = "octoroute";
     // v12: SID estável (sessionStorage) — mesma sessão = mesmo SID em múltiplas tentativas
     var sid = null;
     try { sid = sessionStorage.getItem('_octo_sid_active'); } catch(e) {}
@@ -1439,17 +1387,30 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         [300, 700, 1500]
       );
     } catch(e) { /* fallback adblocker abaixo cobre */ }
-    /* --- HYBRID: pass ALL tracking attributes directly in URL (like OctoRoute) --- */
+    /* --- HYBRID: pass ALL tracking attributes directly in URL (like HeroCart) --- */
     var sep = checkoutUrl.includes("?") ? "&" : "?";
     for (var [ak, av] of Object.entries(cleanTracking)) {
       checkoutUrl += sep + "attributes[" + encodeURIComponent(ak) + "]=" + encodeURIComponent(av);
       sep = "&";
     }
-    // v14.0: _octo_sid / _octo_vid / referrer no longer leak to public URL.
-    // Session is still POST'd to backend (session_id: sid above); recovery uses
-    // cart_token + customer_email Dual-Mode in shopify-webhook.
+    checkoutUrl += sep + "attributes[_octo_sid]=" + encodeURIComponent(sid);
+    // v13: always propagate visitor_id, even if _octo_tracking is empty (enables first-touch lookup)
+    try {
+      var _vid = window.__octoVid;
+      if (_vid && checkoutUrl.indexOf('attributes%5B_octo_vid%5D') === -1 && checkoutUrl.indexOf('attributes[_octo_vid]') === -1) {
+        checkoutUrl += "&attributes[_octo_vid]=" + encodeURIComponent(_vid);
+      }
+    } catch(e) {}
+    // v13.1: propagate document.referrer (truncated 200 chars) for Falcon attribution
+    try {
+      var _ref = (document.referrer || "").slice(0, 200);
+      if (_ref && checkoutUrl.indexOf('attributes%5Breferrer%5D') === -1 && checkoutUrl.indexOf('attributes[referrer]') === -1) {
+        checkoutUrl += "&attributes[referrer]=" + encodeURIComponent(_ref);
+      }
+    } catch(e) {}
     if (bestCoupon?.shopify_coupon) checkoutUrl += "&discount=" + encodeURIComponent(bestCoupon.shopify_coupon);
-    // v14.0: removed top-level &fbclid / &ttclid duplicates — already in attributes[...] above.
+    if (mergedTracking.fbclid) checkoutUrl += "&fbclid=" + encodeURIComponent(mergedTracking.fbclid);
+    if (mergedTracking.ttclid) checkoutUrl += "&ttclid=" + encodeURIComponent(mergedTracking.ttclid);
     return checkoutUrl;
   }
 
@@ -1691,7 +1652,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           flushTrackQueue();
           try { sessionStorage.removeItem('_octo_checkout_ts'); } catch(e) {}
           await new Promise(r => setTimeout(r, 50));
-          window.__octoCloakReferrer();        // v14.2: selective cloak (hides Vitrine, preserves ad/social attribution)
           window.location.href = url || '/checkout';
        } catch(e) {
           trackEvent('error_checkout_redirect', 0, { message: e.message || 'redirect failed' });
@@ -1870,23 +1830,46 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   // Periodic poll every 30s while tab is visible
   setInterval(function() { if (document.visibilityState === 'visible') _cfAutoSync(); }, 30000);
 
-  // ============ v14.0: READY SIGNAL ONLY ============
-  // CSS gating do script-bootstrap foi removido em v14.0 (era fingerprint cruzado).
-  // Não marcamos mais data-octo-checkout-cta no DOM — atributo era visível para
-  // scanners e identificava o app em todas as Vitrines simultaneamente.
-  // Mantemos apenas o sinal interno window.__octoReady, usado pelo replay
-  // de _cfPendingAdds / _cfPendingOpen e por consumidores internos do loader.
+  // ============ v13: NATIVE CTA GATING + READY SIGNAL ============
+  // Marks native checkout buttons with data-octo-checkout-cta so script-bootstrap CSS can disable
+  // them until the loader is ready. Prevents users clicking through before interception is wired.
   (function(){
-    var fired = false;
-    var fire = function(){
-      if (fired) return;
-      fired = true;
+    function markCTAs(root){
+      try {
+        var sel = '.shopify-payment-button, .shopify-payment-button__button, [name="checkout"], a[href*="/checkout"], button[name="checkout"]';
+        var nodes = (root && root.querySelectorAll) ? root.querySelectorAll(sel) : document.querySelectorAll(sel);
+        for (var i = 0; i < nodes.length; i++) {
+          var el = nodes[i];
+          if (!el.hasAttribute('data-octo-checkout-cta')) el.setAttribute('data-octo-checkout-cta','1');
+          if (window.__octoReady) el.setAttribute('data-octo-ready','1');
+        }
+      } catch(e) {}
+    }
+    markCTAs(document);
+    try {
+      var mo = new MutationObserver(function(muts){
+        for (var i = 0; i < muts.length; i++) {
+          var added = muts[i].addedNodes;
+          for (var j = 0; j < added.length; j++) {
+            if (added[j].nodeType === 1) markCTAs(added[j]);
+          }
+        }
+      });
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+    } catch(e) {}
+    function signalReady(){
       try { window.__octoReady = true; } catch(e) {}
-    };
+      try {
+        var all = document.querySelectorAll('[data-octo-checkout-cta]');
+        for (var i = 0; i < all.length; i++) all[i].setAttribute('data-octo-ready','1');
+      } catch(e) {}
+    }
+    var fired = false;
+    var fire = function(){ if (fired) return; fired = true; signalReady(); };
     var checkReady = setInterval(function(){
       if (window._cfConfigReady || window._cfConfig) { clearInterval(checkReady); fire(); }
     }, 100);
-    setTimeout(fire, 2000); // hard fallback
+    setTimeout(fire, 2000); // hard fallback so CTAs never stay disabled forever
   })();
 
 })();
