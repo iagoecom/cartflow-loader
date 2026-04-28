@@ -972,11 +972,21 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   // properties._gift = "1". Removes gift if trigger condition no
   // longer met. Shopify BXGY discount (already created server-side) zeroes
   // the price at checkout. Property name kept generic to avoid fingerprint.
-  function _cfIsGiftItem(item) {
-    return !!(item && item.properties && (
+  function _cfIsGiftItem(item, config) {
+    // Primary: property flag
+    if (item && item.properties && (
       item.properties._gift === '1' || item.properties._gift === 1 ||
       item.properties._octoroute_gift === '1' || item.properties._octoroute_gift === 1
-    ));
+    )) return true;
+    // Fallback: variant_id matches a configured gift (Shopify themes/apps may strip _ properties)
+    try {
+      const cfg = config || window._cfConfig;
+      const gifts = (cfg && Array.isArray(cfg.gifts)) ? cfg.gifts : [];
+      if (!gifts.length || !item) return false;
+      const vid = String(item.variant_id || item.id || '');
+      if (!vid) return false;
+      return gifts.some(g => String(g.gift_shopify_variant_id || '') === vid);
+    } catch(e) { return false; }
   }
 
   async function _cfSyncGifts(cart, config) {
@@ -1219,7 +1229,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const hasCompareDiscount = lineCompareDollars > lineTotalDollars;
           const hasRewardDiscount = !isExcludedUpsell && itemRewardDiscount > 0;
           const hasDis = hasCompareDiscount || hasRewardDiscount;
-          const isGift = _cfIsGiftItem(item);
+          const isGift = _cfIsGiftItem(item, config);
           const displayPrice = isGift ? 0 : (hasRewardDiscount ? discountedTotal : lineTotalDollars);
           const totalSavingsItem = isGift ? 0 : (lineCompareDollars - displayPrice);
           const productTitle = item.product_title || item.title;
@@ -1257,7 +1267,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
               ? ''
               : `<span data-cf-del role="button" tabindex="0" onclick="cfQty('${item.key}',0)" style="all:unset;padding:2px;opacity:0.4;cursor:pointer;color:inherit;transition:opacity 0.15s;display:inline-flex;flex-shrink:0" onmouseenter="this.style.opacity='0.8'" onmouseleave="this.style.opacity='0.4'">${SVG_ICONS.trash}</span>`;
             const qtyControlsHtml = isGift
-              ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border:1px solid rgba(0,0,0,0.15);border-radius:6px;font-size:${fs(12)}px;font-weight:600;color:inherit;opacity:0.75;">Qty 1</span>`
+              ? ''
               : `<div style="display:inline-flex;align-items:center;border:1px solid rgba(0,0,0,0.25);border-radius:6px;overflow:hidden;width:fit-content;">
                     <span data-cf-minus role="button" tabindex="0" onclick="cfQty('${item.key}',${item.quantity-1})" style="all:unset;box-sizing:border-box;width:28px;min-width:28px;max-width:28px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:inherit;flex-shrink:0;">${SVG_ICONS.minus}</span>
                     <span data-cf-qty style="box-sizing:border-box;font-size:${fs(13)}px;width:28px;min-width:28px;max-width:28px;text-align:center;height:26px;line-height:26px;border-left:1px solid rgba(0,0,0,0.25);border-right:1px solid rgba(0,0,0,0.25);flex-shrink:0;">${item.quantity}</span>
