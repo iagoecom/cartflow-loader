@@ -1,7 +1,7 @@
-/* OctoRoute Loader v14.5 — multi-layer referrer cloak + tracking whitelist */
+/* OctoRoute Loader v14.6 — multi-layer referrer cloak + tracking whitelist + scrub */
 (async () => {
-  // v14.5: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v14.5'; } catch(e) {}
+  // v14.6: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v14.6'; } catch(e) {}
 
   // v14.5 — Multi-layer fail-closed referrer cloak.
   // Rule: a Vitrine page must NEVER send its URL as Referer to a White checkout.
@@ -172,7 +172,10 @@
   } catch(e) { _sessionId = 'sid_' + Date.now().toString(36); }
 
 
-  // ============ TRACKING QUEUE (v4 — sendBeacon batch) ============
+  // ============ TRACKING QUEUE (v14.6 — fetch keepalive, no sendBeacon) ============
+  // v14.6: sendBeacon ignores meta Referrer-Policy in some engines and always
+  // leaks the page URL as Referer. fetch with referrerPolicy:'no-referrer' is
+  // honored by all engines; keepalive:true is the modern equivalent for unload.
   let _trackQueue = [];
   let _trackFlushTimer = null;
 
@@ -181,17 +184,36 @@
     const batch = _trackQueue.splice(0);
     const payload = JSON.stringify({ events: batch });
     try {
-      if (navigator.sendBeacon) {
-        const blob = new Blob([payload], { type: 'text/plain' });
-        navigator.sendBeacon(TRACK_URL, blob);
-      } else {
-        (window._cfOrigFetch || fetch)(TRACK_URL, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: payload, keepalive: true
-        }).catch(() => {});
-      }
+      (window._cfOrigFetch || fetch)(TRACK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true,
+        referrerPolicy: 'no-referrer',
+        mode: 'cors',
+        credentials: 'omit'
+      }).catch(() => {});
     } catch(e) {}
   }
+
+  // v14.6: client-side scrub of correlation fields before they reach the wire.
+  // Mirrors FORBIDDEN_KEYS in supabase/functions/store-checkout-attributes
+  // so the client never even tries to emit hostnames or referrer metadata.
+  function __octoScrubTracking(obj) {
+    var FORBIDDEN = ['referrer_domain','referrer','referer','vitrine_url',
+                     'source_url','landing_url','page_url','store_url',
+                     'origin_store','host','hostname','origin'];
+    var HOSTNAME_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+    var out = {};
+    Object.keys(obj || {}).forEach(function(k){
+      if (FORBIDDEN.indexOf(String(k).toLowerCase()) !== -1) return;
+      var v = obj[k];
+      if (typeof v === 'string' && k.charAt(0) !== '_' && HOSTNAME_RE.test(v)) return;
+      out[k] = v;
+    });
+    return out;
+  }
+  try { window.__octoScrubTracking = __octoScrubTracking; } catch(e) {}
 
   function trackEvent(type, amount=0, metadata={}) {
     // v13: propagate visitor_id top-level + in metadata so shopify-webhook can do first-touch lookup
@@ -1349,7 +1371,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const simValue = isQty ? cartItems.reduce((a,i) => a+i.quantity, 0) : cartItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
     const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
     const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
-    var trackingKeys = ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","fbclid","gclid","ttclid"];
+    // v14.6: Shopify-standard 10 attribution keys (6 UTMs + 4 click IDs).
+    var trackingKeys = ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","fbclid","gclid","ttclid","msclkid"];
     var storedTracking = {};
     try { storedTracking = JSON.parse(localStorage.getItem("_octo_tracking") || "{}"); } catch(e) {}
     if (!Object.keys(storedTracking).length) {
@@ -1412,6 +1435,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       }
       return false;
     };
+    // v14.6: scrub correlation fields client-side before they ever leave the browser.
+    try { cleanTracking = __octoScrubTracking(cleanTracking); } catch(e) {}
     try {
       await _octoPostRetry(
         "https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/store-checkout-attributes",
@@ -1434,7 +1459,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     // v14.4: if no real ad/source attribution exists, add a safe Facebook-like
     // UTM fallback so Shopify does not classify the White checkout as Vitrine/direct.
     // Real fbclid/gclid/ttclid/UTMs always win and are never overwritten.
-    var hasRealSource = !!(cleanTracking.utm_source || cleanTracking.fbclid || cleanTracking.gclid || cleanTracking.ttclid || cleanTracking.wbraid || cleanTracking.gbraid || cleanTracking.msclkid);
+    var hasRealSource = !!(cleanTracking.utm_source || cleanTracking.fbclid || cleanTracking.gclid || cleanTracking.ttclid || cleanTracking.msclkid);
     if (!hasRealSource) {
       checkoutUrl += sep + "utm_source=facebook"; sep = "&";
       checkoutUrl += sep + "utm_medium=paid_social"; sep = "&";
