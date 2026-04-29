@@ -758,7 +758,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           <div id="cf-items"></div>
           <div id="cf-ann-after"></div>
           <div id="cf-upsells-bottom"></div>
-          <div id="cf-addon-section" style="padding-bottom:16px"></div>
+          <div id="cf-addon-section" style="margin-top:auto;padding-bottom:16px"></div>
         </div>
         <div id="cf-footer">
           <div id="cf-badges-top"></div>
