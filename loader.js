@@ -1,7 +1,7 @@
-/* OctoRoute Loader v14.7 — referrer cloak + tracking whitelist + scrub + no-fingerprint */
+/* OctoRoute Loader v15.0 — Shopify-rates currency conversion (drawer) */
 (async () => {
-  // v14.7: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v14.7'; } catch(e) {}
+  // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
+  try { window.__OCTO_LOADER_VERSION = 'v15.0'; } catch(e) {}
 
   // v14.5 — Multi-layer fail-closed referrer cloak.
   // Rule: a Vitrine page must NEVER send its URL as Referer to a White checkout.
@@ -267,44 +267,121 @@
   // ============ CART OPEN TIME TRACKING (v4) ============
   let _cartOpenedAt = null;
 
-  // ============ CURRENCY CONVERSION (v4) ============
-  const CURRENCY_RATES = { USD: 1, BRL: 5.481, EUR: 0.899, GBP: 0.782 };
-  const CURRENCY_SYMBOLS = { USD: '$', BRL: 'R$', EUR: '€', GBP: '£' };
-  const TZ_CURRENCY_MAP = {
-    'America/Sao_Paulo': 'BRL', 'America/Fortaleza': 'BRL', 'America/Recife': 'BRL',
-    'America/Bahia': 'BRL', 'America/Belem': 'BRL', 'America/Manaus': 'BRL',
-    'America/Cuiaba': 'BRL', 'America/Campo_Grande': 'BRL', 'America/Porto_Velho': 'BRL',
-    'America/Maceio': 'BRL', 'America/Araguaina': 'BRL', 'America/Noronha': 'BRL',
-    'Europe/London': 'GBP', 'Europe/Paris': 'EUR', 'Europe/Berlin': 'EUR',
-    'Europe/Madrid': 'EUR', 'Europe/Rome': 'EUR', 'Europe/Amsterdam': 'EUR',
-    'Europe/Brussels': 'EUR', 'Europe/Vienna': 'EUR', 'Europe/Lisbon': 'EUR',
-    'Europe/Dublin': 'EUR', 'Europe/Helsinki': 'EUR', 'Europe/Athens': 'EUR',
+  // ============ CURRENCY CONVERSION (v15.0 — Shopify rates) ============
+  // Source of truth: Shopify's /services/javascripts/currencies.js (auto-updated 2x/day,
+  // ~150 currencies). No hardcoded fallback rates: if Shopify CDN is unreachable
+  // (extremely rare — same uptime as Shopify itself), the drawer simply renders
+  // prices in the store's native currency. Showing stale/wrong conversion would
+  // be worse than showing native currency.
+  const CURRENCY_LOCALE = {
+    USD: 'en-US', BRL: 'pt-BR', EUR: 'de-DE', GBP: 'en-GB', JPY: 'ja-JP',
+    CNY: 'zh-CN', AUD: 'en-AU', CAD: 'en-CA', CHF: 'de-CH', SEK: 'sv-SE',
+    NOK: 'nb-NO', DKK: 'da-DK', PLN: 'pl-PL', MXN: 'es-MX', ARS: 'es-AR',
+    INR: 'en-IN', KRW: 'ko-KR', SGD: 'en-SG', HKD: 'zh-HK', NZD: 'en-NZ',
+    ZAR: 'en-ZA', TRY: 'tr-TR', RUB: 'ru-RU', AED: 'ar-AE', SAR: 'ar-SA',
+    ILS: 'he-IL', THB: 'th-TH', MYR: 'ms-MY', IDR: 'id-ID', PHP: 'en-PH',
+    VND: 'vi-VN', CZK: 'cs-CZ', HUF: 'hu-HU', RON: 'ro-RO', CLP: 'es-CL',
+    COP: 'es-CO', PEN: 'es-PE',
   };
+  const GEO_API = 'https://pdeontahcfqcvlxjtnka.supabase.co/functions/v1/geo';
+  const GEO_CACHE_KEY = '_octo_geo_cache';
+  const GEO_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
+  const CURRENCY_OVERRIDE_KEY = '_octo_currency';
+
   let _storeCurrency = 'USD';
   let _visitorCurrency = 'USD';
+  let _shopifyRates = null; // { USD: 1, BRL: 5.48, ... } once loaded
 
-  function detectVisitorCurrency() {
+  // Inject Shopify's currencies.js. Resolves true on success, false on timeout/error.
+  // Always resolves (never rejects) — caller must check _shopifyRates.
+  function loadShopifyRates() {
+    return new Promise((resolve) => {
+      try {
+        if (window.Currency && window.Currency.rates) {
+          _shopifyRates = window.Currency.rates;
+          return resolve(true);
+        }
+        const shop = (window.Shopify && window.Shopify.shop) || window.location.host;
+        const s = document.createElement('script');
+        s.src = `https://${shop}/services/javascripts/currencies.js`;
+        s.async = true;
+        try { s.referrerPolicy = 'no-referrer'; } catch(e) {}
+        s.setAttribute('referrerpolicy', 'no-referrer');
+        let done = false;
+        const finish = (ok) => {
+          if (done) return; done = true;
+          if (ok && window.Currency && window.Currency.rates) {
+            _shopifyRates = window.Currency.rates;
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        };
+        s.onload = () => finish(true);
+        s.onerror = () => finish(false);
+        setTimeout(() => finish(false), 2000);
+        document.head.appendChild(s);
+      } catch(e) { resolve(false); }
+    });
+  }
+
+  async function detectVisitorCurrency() {
+    // 1. Manual override (customer toggled in drawer)
     try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (tz && TZ_CURRENCY_MAP[tz]) return TZ_CURRENCY_MAP[tz];
+      const ov = localStorage.getItem(CURRENCY_OVERRIDE_KEY);
+      if (ov) return ov;
     } catch(e) {}
-    return 'USD';
+    // 2. localStorage cache
+    try {
+      const raw = localStorage.getItem(GEO_CACHE_KEY);
+      if (raw) {
+        const c = JSON.parse(raw);
+        if (c && c.currency && (Date.now() - (c.ts||0)) < GEO_CACHE_TTL) {
+          return c.currency;
+        }
+      }
+    } catch(e) {}
+    // 3. Edge function geo lookup
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 1800);
+      const r = await fetch(GEO_API, { signal: ctrl.signal, referrerPolicy: 'no-referrer', credentials: 'omit' });
+      clearTimeout(t);
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.currency) {
+          try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify({ country: d.country, currency: d.currency, ts: Date.now() })); } catch(e) {}
+          return d.currency;
+        }
+      }
+    } catch(e) {}
+    // 4. Default: store currency
+    return _storeCurrency;
   }
 
+  // amountCents = integer cents in _storeCurrency. Returns Number in _visitorCurrency.
   function convertPrice(cents) {
-    const dollars = cents / 100;
-    if (_storeCurrency === _visitorCurrency) return dollars;
-    const rateFrom = CURRENCY_RATES[_storeCurrency] || 1;
-    const rateTo = CURRENCY_RATES[_visitorCurrency] || 1;
-    return Math.round(dollars / rateFrom * rateTo * 100) / 100;
+    const native = cents / 100;
+    if (!_shopifyRates || _storeCurrency === _visitorCurrency) return native;
+    const rateFrom = _shopifyRates[_storeCurrency];
+    const rateTo = _shopifyRates[_visitorCurrency];
+    if (!rateFrom || !rateTo) return native; // unknown currency → no conversion
+    return (native / rateFrom) * rateTo;
   }
 
-  function formatPrice(dollars) {
-    const sym = CURRENCY_SYMBOLS[_visitorCurrency] || '$';
-    if (_visitorCurrency === 'BRL') {
-      return sym + dollars.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function formatPrice(amount) {
+    const cur = _visitorCurrency || _storeCurrency || 'USD';
+    const locale = CURRENCY_LOCALE[cur] || 'en-US';
+    try {
+      return new Intl.NumberFormat(locale, {
+        style: 'currency',
+        currency: cur,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(Number(amount) || 0);
+    } catch(e) {
+      return `${cur} ${(Number(amount)||0).toFixed(2)}`;
     }
-    return sym + Number(dollars).toFixed(2);
   }
 
   function formatPriceCents(cents) {
@@ -768,6 +845,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
               <span style="font-weight:500">Subtotal:</span>
               <span id="cf-subtotal" style="font-weight:700"></span>
             </div>
+            <div id="cf-currency-note" style="display:none;font-size:11px;text-align:center;opacity:0.65;margin:0 0 8px 0;"></div>
             <button id="cf-checkout">${SVG_ICONS.lock} Secure Checkout</button>
             <div id="cf-continue-wrap"></div>
             <div id="cf-express-wrap"></div>
@@ -1484,6 +1562,17 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const subtotalEl = document.getElementById('cf-subtotal');
     if (subtotalEl) subtotalEl.textContent = formatPriceDollars(finalSubtotal);
 
+    // v15.0: currency conversion disclosure — only when visitor sees a converted price
+    const curNoteEl = document.getElementById('cf-currency-note');
+    if (curNoteEl) {
+      if (_visitorCurrency && _storeCurrency && _visitorCurrency !== _storeCurrency && _shopifyRates) {
+        curNoteEl.textContent = `Charged in ${_storeCurrency} at checkout`;
+        curNoteEl.style.display = 'block';
+      } else {
+        curNoteEl.style.display = 'none';
+      }
+    }
+
     const discRow = document.getElementById('cf-discounts-row');
     if (discRow) {
       if (activeRewardLabels.length > 0) {
@@ -1988,9 +2077,16 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     window._cfConfig = config;
     _storeCurrency = config.visual?.store_currency || 'USD';
 
-    if (config.visual?.currency_conversion_enabled === true) {
-      _visitorCurrency = detectVisitorCurrency();
-    }
+    // v15.0: kick off currency detection + Shopify rates in parallel with init.
+    // Both have hard timeouts (1.8s / 2s) and fail silently → drawer just renders
+    // in store currency. Once both resolve, re-render if visitor currency differs.
+    Promise.all([detectVisitorCurrency(), loadShopifyRates()]).then(([visCur, ratesOk]) => {
+      const target = visCur || _storeCurrency;
+      if (target && target !== _visitorCurrency) {
+        _visitorCurrency = target;
+        try { if (window._lastCart && window._cfConfig) renderCart(window._lastCart, window._cfConfig); } catch(e) {}
+      }
+    }).catch(() => {});
 
     _fontScale = SCALE_MAP[config.visual?.font_scale] || 1.15;
     injectStyles(config.visual||{});
