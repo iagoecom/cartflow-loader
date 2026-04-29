@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.2 — currency: vitrine native currency from config (was hardcoded USD) */
+/* OctoRoute Loader v15.4 — currency: normalized Shopify rates + external fallback */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.2'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.4'; } catch(e) {}
 
   // v14.5 — Multi-layer fail-closed referrer cloak.
   // Rule: a Vitrine page must NEVER send its URL as Referer to a White checkout.
@@ -287,42 +287,110 @@
   const GEO_CACHE_KEY = '_octo_geo_cache';
   const GEO_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
   const CURRENCY_OVERRIDE_KEY = '_octo_currency';
+  const RATES_CACHE_KEY = '_octo_rates_cache';
+  const RATES_CACHE_TTL = 6 * 60 * 60 * 1000; // 6h
+  const FRANKFURTER_URL = 'https://api.frankfurter.app/latest?from=USD';
+  const HARDCODED_RATES = {
+    USD: 1, EUR: 0.92, GBP: 0.79, BRL: 5.48, CAD: 1.36,
+    AUD: 1.53, JPY: 149.5, CHF: 0.90, SEK: 10.4, NOK: 10.6,
+    DKK: 6.88, PLN: 3.97, MXN: 17.2, ARS: 870, CLP: 897,
+    COP: 3950, PEN: 3.71, INR: 83.1, KRW: 1325, SGD: 1.34,
+    HKD: 7.82, NZD: 1.63, ZAR: 18.6, TRY: 32.1, AED: 3.67,
+    SAR: 3.75, ILS: 3.69, THB: 35.1, MYR: 4.71, IDR: 15650,
+    PHP: 56.4, VND: 24850, CZK: 22.8, HUF: 356, RON: 4.58,
+  };
 
   let _storeCurrency = 'USD';
   let _visitorCurrency = 'USD';
-  let _shopifyRates = null; // { USD: 1, BRL: 5.48, ... } once loaded
+  let _shopifyRates = null; // normalized as USD base: { USD: 1, BRL: 5.48, ... }
 
-  // Inject Shopify's currencies.js. Resolves true on success, false on timeout/error.
-  // Always resolves (never rejects) — caller must check _shopifyRates.
-  function loadShopifyRates() {
-    return new Promise((resolve) => {
-      try {
-        if (window.Currency && window.Currency.rates) {
-          _shopifyRates = window.Currency.rates;
-          return resolve(true);
-        }
-        const shop = (window.Shopify && window.Shopify.shop) || window.location.host;
-        const s = document.createElement('script');
-        s.src = `https://${shop}/services/javascripts/currencies.js`;
-        s.async = true;
-        try { s.referrerPolicy = 'no-referrer'; } catch(e) {}
-        s.setAttribute('referrerpolicy', 'no-referrer');
-        let done = false;
-        const finish = (ok) => {
-          if (done) return; done = true;
-          if (ok && window.Currency && window.Currency.rates) {
-            _shopifyRates = window.Currency.rates;
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-        };
-        s.onload = () => finish(true);
-        s.onerror = () => finish(false);
-        setTimeout(() => finish(false), 2000);
-        document.head.appendChild(s);
-      } catch(e) { resolve(false); }
+  function normalizeRates(rawRates, source) {
+    const raw = rawRates && typeof rawRates === 'object' ? rawRates : null;
+    if (!raw || Object.keys(raw).length === 0) return null;
+    const usd = Number(raw.USD || 1) || 1;
+    const normalized = { USD: 1 };
+    Object.keys(raw).forEach((code) => {
+      const val = Number(raw[code]);
+      if (!code || !isFinite(val) || val <= 0) return;
+      // Shopify currencies.js rates are USD-per-currency (BRL≈0.20), while Frankfurter
+      // uses currency-per-USD (BRL≈5.0). Normalize every source to currency-per-USD.
+      normalized[code] = source === 'shopify' ? usd / val : val / usd;
     });
+    normalized.USD = 1;
+    return normalized;
+  }
+
+  function applyRates(rawRates, source) {
+    const normalized = normalizeRates(rawRates, source);
+    if (!normalized) return false;
+    _shopifyRates = normalized;
+    try { window.__octoRatesSource = source; } catch(e) {}
+    return true;
+  }
+
+  // Loads rates for any vitrine: Shopify Payments rates → cache → Frankfurter → hardcoded.
+  // Always resolves true because the hardcoded fallback is the last safety net.
+  async function loadShopifyRates() {
+    try {
+      const shopifyLoaded = await new Promise((res) => {
+        try {
+          if (window.Currency && window.Currency.rates && Object.keys(window.Currency.rates).length > 0) {
+            return res(applyRates(window.Currency.rates, 'shopify'));
+          }
+          const shop = (window.Shopify && window.Shopify.shop) || window.location.host;
+          const s = document.createElement('script');
+          s.src = `https://${shop}/services/javascripts/currencies.js`;
+          s.async = true;
+          try { s.referrerPolicy = 'no-referrer'; } catch(e) {}
+          s.setAttribute('referrerpolicy', 'no-referrer');
+          let done = false;
+          const finish = (ok) => {
+            if (done) return; done = true;
+            if (ok && window.Currency && window.Currency.rates && Object.keys(window.Currency.rates).length > 0) {
+              res(applyRates(window.Currency.rates, 'shopify'));
+            } else {
+              res(false);
+            }
+          };
+          s.onload = () => finish(true);
+          s.onerror = () => finish(false);
+          setTimeout(() => finish(false), 2000);
+          document.head.appendChild(s);
+        } catch(e) { res(false); }
+      });
+      if (shopifyLoaded) return true;
+
+      try {
+        const raw = localStorage.getItem(RATES_CACHE_KEY);
+        if (raw) {
+          const cached = JSON.parse(raw);
+          if (cached && cached.rates && (Date.now() - (cached.ts || 0)) < RATES_CACHE_TTL && applyRates(cached.rates, 'cache')) return true;
+        }
+      } catch(e) {}
+
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 3000);
+        const r = await fetch(FRANKFURTER_URL, { signal: ctrl.signal, referrerPolicy: 'no-referrer', credentials: 'omit' });
+        clearTimeout(t);
+        if (r.ok) {
+          const data = await r.json();
+          if (data && data.rates && typeof data.rates === 'object') {
+            const rates = { USD: 1, ...data.rates };
+            if (applyRates(rates, 'frankfurter')) {
+              try { localStorage.setItem(RATES_CACHE_KEY, JSON.stringify({ rates, ts: Date.now(), source: 'frankfurter' })); } catch(e) {}
+              return true;
+            }
+          }
+        }
+      } catch(e) {}
+
+      applyRates(HARDCODED_RATES, 'hardcoded');
+      return true;
+    } catch(e) {
+      applyRates(HARDCODED_RATES, 'hardcoded');
+      return true;
+    }
   }
 
   async function detectVisitorCurrency() {
@@ -2082,23 +2150,23 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     window._cfConfig = config;
     _storeCurrency = config.visual?.store_currency || 'USD';
 
-    // v15.2: only run currency detection/conversion when dashboard toggle is ON.
+    // v15.4: only run currency detection/conversion when dashboard toggle is ON.
     // Critical: _storeCurrency now comes from the real Shopify shop currency
     // (visual.store_currency, set by config edge function). Without this, conversion
     // would multiply by wrong base. Re-render only fires if rates loaded successfully —
     // otherwise we keep visitor=store to avoid "symbol swap without conversion".
     if (config.visual?.currency_conversion_enabled === true) {
-      Promise.all([detectVisitorCurrency(), loadShopifyRates()]).then(([visCur, ratesOk]) => {
-        if (ratesOk && visCur && visCur !== _visitorCurrency) {
-          _visitorCurrency = visCur;
+      Promise.all([detectVisitorCurrency(), loadShopifyRates()]).then(([visCur]) => {
+        const target = visCur || _storeCurrency;
+        try { window.__octoVisitorCurrency = target; window.__octoStoreCurrency = _storeCurrency; } catch(e) {}
+        if (target && target !== _visitorCurrency) {
+          _visitorCurrency = target;
           try { if (window._lastCart && window._cfConfig) renderCart(window._lastCart, window._cfConfig); } catch(e) {}
-        } else if (!ratesOk) {
-          // Rates failed to load → keep visitor = store so prices stay native + correct symbol.
-          _visitorCurrency = _storeCurrency;
         }
       }).catch(() => { _visitorCurrency = _storeCurrency; });
     } else {
       _visitorCurrency = _storeCurrency;
+      try { window.__octoVisitorCurrency = _visitorCurrency; window.__octoStoreCurrency = _storeCurrency; } catch(e) {}
     }
 
     _fontScale = SCALE_MAP[config.visual?.font_scale] || 1.15;
