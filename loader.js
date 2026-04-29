@@ -1,4 +1,4 @@
-/* OctoRoute Loader v15.0 — Shopify-rates currency conversion (drawer) */
+/* OctoRoute Loader v15.1 — currency: actual conversion + dashboard toggle gate */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
   try { window.__OCTO_LOADER_VERSION = 'v15.0'; } catch(e) {}
@@ -407,7 +407,12 @@
     }
   }
 
-  function formatPriceDollars(val) { return formatPrice(Number(val)); }
+  // v15.1: convert before formatting. `val` is a number in store-currency units (not cents).
+  // Without this, only the currency symbol changed (R$ 49.90 instead of R$ 273.45 for $49.90 USD).
+  function formatPriceDollars(val) {
+    const cents = Math.round(Number(val) * 100);
+    return formatPrice(convertPrice(cents));
+  }
 
   function contrastText(hex) {
     if (!hex || hex.length < 7) return '#000000';
@@ -2077,16 +2082,20 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     window._cfConfig = config;
     _storeCurrency = config.visual?.store_currency || 'USD';
 
-    // v15.0: kick off currency detection + Shopify rates in parallel with init.
-    // Both have hard timeouts (1.8s / 2s) and fail silently → drawer just renders
-    // in store currency. Once both resolve, re-render if visitor currency differs.
-    Promise.all([detectVisitorCurrency(), loadShopifyRates()]).then(([visCur, ratesOk]) => {
-      const target = visCur || _storeCurrency;
-      if (target && target !== _visitorCurrency) {
-        _visitorCurrency = target;
-        try { if (window._lastCart && window._cfConfig) renderCart(window._lastCart, window._cfConfig); } catch(e) {}
-      }
-    }).catch(() => {});
+    // v15.1: only run currency detection/conversion when dashboard toggle is ON.
+    // When OFF, force visitor currency = store currency → convertPrice is a no-op
+    // and the "Charged in X at checkout" note stays hidden (its guard requires the two to differ).
+    if (config.visual?.currency_conversion_enabled === true) {
+      Promise.all([detectVisitorCurrency(), loadShopifyRates()]).then(([visCur, ratesOk]) => {
+        const target = visCur || _storeCurrency;
+        if (target && target !== _visitorCurrency) {
+          _visitorCurrency = target;
+          try { if (window._lastCart && window._cfConfig) renderCart(window._lastCart, window._cfConfig); } catch(e) {}
+        }
+      }).catch(() => {});
+    } else {
+      _visitorCurrency = _storeCurrency;
+    }
 
     _fontScale = SCALE_MAP[config.visual?.font_scale] || 1.15;
     injectStyles(config.visual||{});
@@ -2146,6 +2155,10 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
         _spActive = fresh.visual?.sp_pre_checked || false;
         _gwActive = fresh.visual?.gw_pre_checked || false;
         _storeCurrency = fresh.visual?.store_currency || 'USD';
+        // v15.1: re-evaluate currency conversion gate on auto-sync (toggle may have flipped).
+        if (fresh.visual?.currency_conversion_enabled !== true) {
+          _visitorCurrency = _storeCurrency;
+        }
         try { document.getElementById('cartflow-styles')?.remove(); injectStyles(fresh.visual||{}); } catch(e) {}
         try { if (window._lastCart) renderCart(window._lastCart, fresh); } catch(e) {}
         // v14.7: removed production console.log
