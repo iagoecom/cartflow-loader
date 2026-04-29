@@ -993,8 +993,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const items = (cart && cart.items) || [];
 
     // Build maps: trigger product_id -> {qty, total_cents}; gift variant -> item key
+    // Also accumulate cart-wide totals (excluding gifts) for reward_tier free_product triggers.
     const triggerStats = new Map();
     const giftItemsByVariant = new Map();
+    let cartTotalCents = 0;
+    let cartTotalQty = 0;
     for (const it of items) {
       const pid = it.product_id != null ? String(it.product_id) : '';
       const vid = it.variant_id != null ? String(it.variant_id) : '';
@@ -1002,10 +1005,14 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         if (vid) giftItemsByVariant.set(vid, it);
         continue;
       }
+      const lineCents = Number(it.line_price != null ? it.line_price : (it.price * (it.quantity||1)));
+      const qty = Number(it.quantity || 0);
+      cartTotalCents += lineCents;
+      cartTotalQty += qty;
       if (!pid) continue;
       const prev = triggerStats.get(pid) || { qty: 0, cents: 0 };
-      prev.qty += Number(it.quantity || 0);
-      prev.cents += Number(it.line_price != null ? it.line_price : (it.price * (it.quantity||1)));
+      prev.qty += qty;
+      prev.cents += lineCents;
       triggerStats.set(pid, prev);
     }
 
@@ -1018,16 +1025,27 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const toRemove = [];
     const wantedVariants = new Set();
     for (const g of gifts) {
-      const trigPid = String(g.trigger_shopify_product_id || '');
       const giftVid = String(g.gift_shopify_variant_id || '');
-      if (!trigPid || !giftVid) continue;
-      const stats = triggerStats.get(trigPid) || { qty: 0, cents: 0 };
+      if (!giftVid) continue;
+      const trigPid = String(g.trigger_shopify_product_id || '');
+      const condValue = Number(g.condition_value || 0);
       let conditionMet = false;
-      if (g.condition_type === 'min_value' || g.condition_type === 'min_amount') {
-        conditionMet = (stats.cents / 100) >= Number(g.condition_value || 0);
+      if (!trigPid) {
+        // Reward tier free_product: trigger by cart-wide total or quantity
+        if (g.condition_type === 'cart_quantity') {
+          conditionMet = cartTotalQty >= condValue;
+        } else {
+          // default: cart_total (in dollars)
+          conditionMet = (cartTotalCents / 100) >= condValue;
+        }
       } else {
-        // default: min_quantity
-        conditionMet = stats.qty >= Number(g.condition_value || 1);
+        const stats = triggerStats.get(trigPid) || { qty: 0, cents: 0 };
+        if (g.condition_type === 'min_value' || g.condition_type === 'min_amount') {
+          conditionMet = (stats.cents / 100) >= condValue;
+        } else {
+          // default: min_quantity
+          conditionMet = stats.qty >= Number(g.condition_value || 1);
+        }
       }
       const alreadyInCart = giftItemsByVariant.has(giftVid);
       if (conditionMet) {
