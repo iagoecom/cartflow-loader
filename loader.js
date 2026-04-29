@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.1 — currency: actual conversion + dashboard toggle gate */
+/* OctoRoute Loader v15.2 — currency: vitrine native currency from config (was hardcoded USD) */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.0'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.2'; } catch(e) {}
 
   // v14.5 — Multi-layer fail-closed referrer cloak.
   // Rule: a Vitrine page must NEVER send its URL as Referer to a White checkout.
@@ -2082,17 +2082,21 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     window._cfConfig = config;
     _storeCurrency = config.visual?.store_currency || 'USD';
 
-    // v15.1: only run currency detection/conversion when dashboard toggle is ON.
-    // When OFF, force visitor currency = store currency → convertPrice is a no-op
-    // and the "Charged in X at checkout" note stays hidden (its guard requires the two to differ).
+    // v15.2: only run currency detection/conversion when dashboard toggle is ON.
+    // Critical: _storeCurrency now comes from the real Shopify shop currency
+    // (visual.store_currency, set by config edge function). Without this, conversion
+    // would multiply by wrong base. Re-render only fires if rates loaded successfully —
+    // otherwise we keep visitor=store to avoid "symbol swap without conversion".
     if (config.visual?.currency_conversion_enabled === true) {
       Promise.all([detectVisitorCurrency(), loadShopifyRates()]).then(([visCur, ratesOk]) => {
-        const target = visCur || _storeCurrency;
-        if (target && target !== _visitorCurrency) {
-          _visitorCurrency = target;
+        if (ratesOk && visCur && visCur !== _visitorCurrency) {
+          _visitorCurrency = visCur;
           try { if (window._lastCart && window._cfConfig) renderCart(window._lastCart, window._cfConfig); } catch(e) {}
+        } else if (!ratesOk) {
+          // Rates failed to load → keep visitor = store so prices stay native + correct symbol.
+          _visitorCurrency = _storeCurrency;
         }
-      }).catch(() => {});
+      }).catch(() => { _visitorCurrency = _storeCurrency; });
     } else {
       _visitorCurrency = _storeCurrency;
     }
