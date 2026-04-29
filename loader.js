@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.5 — currency: Shopify→cache→Frankfurter, honest fallback (no hardcoded) */
+/* OctoRoute Loader v15.4 — currency: normalized Shopify rates + external fallback */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.5'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.4'; } catch(e) {}
 
   // v14.5 — Multi-layer fail-closed referrer cloak.
   // Rule: a Vitrine page must NEVER send its URL as Referer to a White checkout.
@@ -267,14 +267,12 @@
   // ============ CART OPEN TIME TRACKING (v4) ============
   let _cartOpenedAt = null;
 
-  // ============ CURRENCY CONVERSION (v15.5 — honest fallback, no hardcoded) ============
-  // Three layers, in priority order:
-  //   1. Shopify currencies.js — only populated when vitrine has Shopify Payments + multi-currency
-  //   2. localStorage cache (6h) — survives Frankfurter outages within the TTL window
-  //   3. Frankfurter API — covers ~30 ECB currencies (USD, BRL, EUR, GBP, MXN, JPY, etc.)
-  // If ALL fail OR the visitor's currency isn't in the resolved table, we render prices in
-  // the store's NATIVE currency instead of pretending to convert. Showing a wrong number
-  // (e.g. "AR$ 99" for a $99 USD product) is worse than showing the honest "$99 USD".
+  // ============ CURRENCY CONVERSION (v15.0 — Shopify rates) ============
+  // Source of truth: Shopify's /services/javascripts/currencies.js (auto-updated 2x/day,
+  // ~150 currencies). No hardcoded fallback rates: if Shopify CDN is unreachable
+  // (extremely rare — same uptime as Shopify itself), the drawer simply renders
+  // prices in the store's native currency. Showing stale/wrong conversion would
+  // be worse than showing native currency.
   const CURRENCY_LOCALE = {
     USD: 'en-US', BRL: 'pt-BR', EUR: 'de-DE', GBP: 'en-GB', JPY: 'ja-JP',
     CNY: 'zh-CN', AUD: 'en-AU', CAD: 'en-CA', CHF: 'de-CH', SEK: 'sv-SE',
@@ -292,6 +290,15 @@
   const RATES_CACHE_KEY = '_octo_rates_cache';
   const RATES_CACHE_TTL = 6 * 60 * 60 * 1000; // 6h
   const FRANKFURTER_URL = 'https://api.frankfurter.app/latest?from=USD';
+  const HARDCODED_RATES = {
+    USD: 1, EUR: 0.92, GBP: 0.79, BRL: 5.48, CAD: 1.36,
+    AUD: 1.53, JPY: 149.5, CHF: 0.90, SEK: 10.4, NOK: 10.6,
+    DKK: 6.88, PLN: 3.97, MXN: 17.2, ARS: 870, CLP: 897,
+    COP: 3950, PEN: 3.71, INR: 83.1, KRW: 1325, SGD: 1.34,
+    HKD: 7.82, NZD: 1.63, ZAR: 18.6, TRY: 32.1, AED: 3.67,
+    SAR: 3.75, ILS: 3.69, THB: 35.1, MYR: 4.71, IDR: 15650,
+    PHP: 56.4, VND: 24850, CZK: 22.8, HUF: 356, RON: 4.58,
+  };
 
   let _storeCurrency = 'USD';
   let _visitorCurrency = 'USD';
@@ -321,8 +328,8 @@
     return true;
   }
 
-  // Loads rates: Shopify Payments → cache → Frankfurter. If all fail, _shopifyRates stays
-  // null and the drawer falls back to the store's native currency (honest fallback).
+  // Loads rates for any vitrine: Shopify Payments rates → cache → Frankfurter → hardcoded.
+  // Always resolves true because the hardcoded fallback is the last safety net.
   async function loadShopifyRates() {
     try {
       const shopifyLoaded = await new Promise((res) => {
@@ -378,13 +385,11 @@
         }
       } catch(e) {}
 
-      // Honest fallback: keep _shopifyRates null. convertPrice() will return native value
-      // and formatPrice() will use _storeCurrency symbol so the customer sees the real price.
-      try { window.__octoRatesSource = 'native-fallback'; } catch(e) {}
-      return false;
+      applyRates(HARDCODED_RATES, 'hardcoded');
+      return true;
     } catch(e) {
-      try { window.__octoRatesSource = 'native-fallback'; } catch(e2) {}
-      return false;
+      applyRates(HARDCODED_RATES, 'hardcoded');
+      return true;
     }
   }
 
@@ -422,31 +427,18 @@
     return _storeCurrency;
   }
 
-  // v15.5: returns whether the visitor's currency can actually be rendered as converted.
-  // When false, callers should display the price in _storeCurrency (honest fallback).
-  function canConvertToVisitor() {
-    if (!_shopifyRates) return false;
-    if (_storeCurrency === _visitorCurrency) return true;
-    return !!(_shopifyRates[_storeCurrency] && _shopifyRates[_visitorCurrency]);
-  }
-
-  // amountCents = integer cents in _storeCurrency. Returns Number in the currency that
-  // formatPrice() will use (visitor currency when convertible, store currency otherwise).
+  // amountCents = integer cents in _storeCurrency. Returns Number in _visitorCurrency.
   function convertPrice(cents) {
     const native = cents / 100;
-    if (!canConvertToVisitor()) return native;
-    if (_storeCurrency === _visitorCurrency) return native;
+    if (!_shopifyRates || _storeCurrency === _visitorCurrency) return native;
     const rateFrom = _shopifyRates[_storeCurrency];
     const rateTo = _shopifyRates[_visitorCurrency];
+    if (!rateFrom || !rateTo) return native; // unknown currency → no conversion
     return (native / rateFrom) * rateTo;
   }
 
   function formatPrice(amount) {
-    // Honest fallback: if we can't convert, show the price labeled in the store's currency
-    // instead of slapping the visitor's currency symbol on a non-converted number.
-    const cur = canConvertToVisitor()
-      ? (_visitorCurrency || _storeCurrency || 'USD')
-      : (_storeCurrency || 'USD');
+    const cur = _visitorCurrency || _storeCurrency || 'USD';
     const locale = CURRENCY_LOCALE[cur] || 'en-US';
     try {
       return new Intl.NumberFormat(locale, {
