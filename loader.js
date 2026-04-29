@@ -238,14 +238,7 @@
     window.addEventListener('pagehide', flushTrackQueue);
   } catch(e) {}
 
-  // --- Page view tracking (1x per session) ---
-  try {
-    if (!sessionStorage.getItem('_octo_pv')) {
-      // v14.7: never log raw document.referrer (could leak full URL of external sites)
-      trackEvent('page_view', 0, { pathname: window.location.pathname, visitor_id: window.__octoVid || null });
-      sessionStorage.setItem('_octo_pv', '1');
-    }
-  } catch(e) {}
+  // page_view tracking removed — not used by analytics dashboard
 
   // ============ BFCACHE RESET (v11) ============
   function resetCheckoutBtn() {
@@ -267,17 +260,6 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       resetCheckoutBtn();
-      // Detect checkout abandonment: user clicked checkout, left, came back within 5min
-      try {
-        const ts = sessionStorage.getItem('_octo_checkout_ts');
-        if (ts && (Date.now() - parseInt(ts)) < 300000) {
-          trackEvent('checkout_abandoned', 0, {
-            cart_total: window._lastCart?.total_price ? window._lastCart.total_price / 100 : 0,
-            item_count: window._lastCart?.item_count || 0
-          });
-          sessionStorage.removeItem('_octo_checkout_ts');
-        }
-      } catch(e) {}
     }
   });
 
@@ -524,7 +506,7 @@ async function getConfig(skus) {
     // Fresh fetch
     try {
       const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { referrerPolicy: 'no-referrer', credentials: 'omit' });
-      if (!r.ok) { trackEvent('error_config_load', 0, { status: r.status, message: 'HTTP ' + r.status }); return null; }
+      if (!r.ok) { return null; }
       const data = await r.json();
       setCachedConfig(data);
       sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(data));
@@ -532,7 +514,7 @@ async function getConfig(skus) {
       _gwActive = data.visual?.gw_pre_checked || false;
       _storeCurrency = data.visual?.store_currency || 'USD';
       return data;
-    } catch(e) { trackEvent('error_config_load', 0, { message: e.message || 'fetch failed' }); return null; }
+    } catch(e) { return null; }
   }
 
   async function getVitrineSkuMap() {
@@ -590,14 +572,8 @@ async function getConfig(skus) {
   }
 
   async function fetchShopifyCart() {
-    try {
-      const res = await (window._cfOrigFetch || fetch)('/cart.js', { referrerPolicy: 'no-referrer' });
-      if (!res.ok) { trackEvent('error_cart_fetch', 0, { status: res.status, message: 'HTTP ' + res.status }); }
-      return await res.json();
-    } catch(err) {
-      trackEvent('error_cart_fetch', 0, { message: err.message || 'fetch failed' });
-      throw err;
-    }
+    const res = await (window._cfOrigFetch || fetch)('/cart.js', { referrerPolicy: 'no-referrer' });
+    return await res.json();
   }
 
   function getDrawerWidth(v) {
@@ -888,13 +864,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     })());
   }
   function closeCart() {
-    // Track if user closed without any interaction
-    if (!_hadInteraction && _cartOpenedAt) {
-      trackEvent('cart_closed_no_action', 0, {
-        duration_ms: Date.now() - _cartOpenedAt,
-        item_count: window._lastCart?.item_count || 0
-      });
-    }
     // Reset checkout button state
     const ckBtn = document.getElementById('cf-checkout');
     if (ckBtn) { const btnText = window._cfConfig?.visual?.checkout_button_text || 'Secure Checkout'; ckBtn.disabled = false; ckBtn.innerHTML = `${SVG_ICONS.lock} ${btnText}`; }
@@ -916,12 +885,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       window.scrollTo(0, sy);
       window._cfSavedScrollY = 0;
     } catch(e) { document.body.style.overflow = ''; }
-    // Track time in cart
-    if (_cartOpenedAt) {
-      const seconds = Math.round((Date.now() - _cartOpenedAt) / 1000);
-      trackEvent('cart_closed', 0, { time_in_cart_seconds: seconds });
-      _cartOpenedAt = null;
-    }
+    _cartOpenedAt = null;
     _lastSkus = '';
     // FIX v11.9 - upsell reaparece: força re-render dos upsells na próxima abertura.
     // Bug: _cfPrevUpsellIds persistia entre fechamentos; se algo limpava o innerHTML
@@ -1402,8 +1366,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       if (btmEl) btmEl.innerHTML = '';
     }
     if (v.upsells_enabled && visibleUpsells.length > 0 && upsellsChanged) {
-      // Track upsell views (v4)
-      visibleUpsells.forEach(p => trackEvent('upsell_viewed', p.price||0, { title: p.title, sku: p.sku }));
       const upsellBg = accentColor;
       const upsellText = accentTextColor;
       const isStack = (v.upsells_direction||'stack') !== 'inline';
@@ -1772,7 +1734,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       } catch(_) {}
     }
     if (!added) {
-      trackEvent('error_upsell_add', 0, { product_title: product.title, message: 'add failed (vitrine variant unresolved)' });
       // Restore upsell visibility so user can retry
       if (window._originalUpsells && window._cfConfig) {
         window._cfConfig.upsells = window._originalUpsells.filter(u => !_addedUpsellSkus.has((u.sku||'').toUpperCase()));
@@ -1906,20 +1867,16 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         btn._origHtml = btn._origHtml || btn.innerHTML;
         const origHtml = btn._origHtml;
         btn.innerHTML = `${SVG_ICONS.spin} SECURE CHECKOUT`;
-        trackEvent('checkout_clicked');
-        try { sessionStorage.setItem('_octo_checkout_ts', String(Date.now())); } catch(e) {}
         try {
           const cart = _upsellPending ? await fetchShopifyCart() : (window._lastCart || await fetchShopifyCart());
           window._lastCart = cart;
           const url = await buildCheckoutUrl(cart.items, window._cfConfig);
           trackEvent('checkout', cart.total_price/100, { addon_total: window._cfAddonTotal || 0, upsell_total: window._cfUpsellTotal || 0 });
           flushTrackQueue();
-          try { sessionStorage.removeItem('_octo_checkout_ts'); } catch(e) {}
           await new Promise(r => setTimeout(r, 50));
           window.__octoCloakReferrer();        // v14.4: fail-closed cloak (never sends Vitrine Referer to White)
           window.location.href = url || '/checkout';
        } catch(e) {
-          trackEvent('error_checkout_redirect', 0, { message: e.message || 'redirect failed' });
           btn.disabled=false; btn.innerHTML=origHtml;
         }
         return;
@@ -2027,13 +1984,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     // v11.11: mark ready and drain buffered intents
     window._cfConfigReady = true;
     _cfFlushPending();
-    trackEvent('cart_impression', initialCart.total_price ? initialCart.total_price/100 : 0, {
-      items: (initialCart.items||[]).map(i => ({ title: i.title, variant: i.variant_title||'', qty: i.quantity, price: (i.price||0)/100 })),
-      item_count: initialCart.item_count || 0,
-      total: initialCart.total_price ? initialCart.total_price/100 : 0,
-      addon_total: window._cfAddonTotal || 0,
-      upsell_total: window._cfUpsellTotal || 0
-    });
+    // cart_impression removed — dashboard uses cart_opened only
     // v14.7: removed production console.log (was leaking outdated version string)
   } catch(err) { console.error('[CartFlow] Init error:', err); }
 
