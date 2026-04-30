@@ -718,8 +718,6 @@ async function getConfig(skus) {
   }
 
   async function fetchUpsells(cart) {
-    // v15.8 Opt 6: skip entirely if upsells disabled — saves HTTP request per add-to-cart
-    if (!window._cfConfig?.visual?.upsells_enabled) return;
     const skus = (cart.items || [])
       .map(i => i.sku)
       .filter(s => s && !_addedUpsellSkus.has(s))
@@ -727,34 +725,6 @@ async function getConfig(skus) {
     if (!skus) { _lastSkus = ''; return; }
     if (skus === _lastSkus) return;
     _lastSkus = skus;
-
-    // v15.8 Opt 4: sessionStorage cache (5min TTL) — avoids refetch on same-tab navigation
-    const _cacheKey = '_cf_upsells_' + skus;
-    try {
-      const _raw = sessionStorage.getItem(_cacheKey);
-      if (_raw) {
-        const _cached = JSON.parse(_raw);
-        if (_cached && _cached.ts && (Date.now() - _cached.ts) < 5 * 60 * 1000 && Array.isArray(_cached.upsells)) {
-          if (window._cfConfig) {
-            const incoming = _cached.upsells;
-            const current = Array.isArray(window._cfConfig.upsells) ? window._cfConfig.upsells : [];
-            if (incoming.length > 0 || current.length === 0) {
-              window._cfConfig.upsells = incoming;
-              if (incoming.length > 0) window._originalUpsells = incoming.slice();
-            }
-            // v15.8 Opt 2: preload images for cached upsells too
-            try {
-              if (window._cfPreloadImages && incoming.length) {
-                const _u = incoming.map(p => p.image_url || (p.variants && p.variants[0] && p.variants[0].image_url) || '').filter(Boolean);
-                if (_u.length) window._cfPreloadImages(_u);
-              }
-            } catch(e) {}
-          }
-          return;
-        }
-      }
-    } catch(e) {}
-
     try {
       const r = await window._cfOrigFetch(`${API_URL}?token=${TOKEN}&skus=${skus}`, { referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (r.ok) {
@@ -767,17 +737,6 @@ async function getConfig(skus) {
             window._cfConfig.upsells = incoming;
             if (incoming.length > 0) window._originalUpsells = incoming.slice();
           }
-          // v15.8 Opt 4: persist to sessionStorage for future page-views in same tab
-          try {
-            sessionStorage.setItem(_cacheKey, JSON.stringify({ ts: Date.now(), upsells: incoming }));
-          } catch(e) {}
-          // v15.8 Opt 2: preload images right after fetch — drawer paint is instant when opened
-          try {
-            if (window._cfPreloadImages && incoming.length) {
-              const _u = incoming.map(p => p.image_url || (p.variants && p.variants[0] && p.variants[0].image_url) || '').filter(Boolean);
-              if (_u.length) window._cfPreloadImages(_u);
-            }
-          } catch(e) {}
         }
       }
     } catch(e) {}
@@ -1612,7 +1571,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
               const imgSrc = p.image_url || p.variants?.[0]?.image_url || '';
               return `
                 <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
-                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" width="80" height="80" src="${imgSrc}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
+                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
                   <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
                     <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
