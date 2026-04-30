@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.8 — Fail-open ATC + checkout nav guard while config is loading. */
+/* OctoRoute Loader v15.7 — Fail-open ATC: open shell drawer immediately, swap to full UI when config arrives. */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.8'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.7'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -2070,33 +2070,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       finally { setTimeout(() => { window._cfAddInFlight = false; }, 500); }
     }, { capture: true });
 
-    // v15.8: Checkout navigation guard — while config is NOT ready, intercept any
-    // click on a link to /checkout, /cart, or *.myshopify.com/checkout and open the
-    // shell drawer instead. This prevents the user from escaping into Shopify's
-    // native checkout (which would bypass the white-store pre-checkout redirect)
-    // during the brief window between page load and config arrival.
-    // SECURITY INVARIANT: this MUST run in capture phase, BEFORE the theme's own
-    // handlers, and MUST stopPropagation so no other handler can re-fire navigation.
-    document.addEventListener('click', (e) => {
-      try {
-        if (window._cfConfigReady) return;
-        const a = e.target && e.target.closest && e.target.closest('a[href]');
-        if (!a) return;
-        const href = a.getAttribute('href') || '';
-        // Match /checkout, /checkout?..., /checkout/..., /cart, /cart?..., /cart/...,
-        // and absolute *.myshopify.com/checkout URLs.
-        const isCheckout = /(^|\/)checkout(\/|\?|$)/i.test(href) || /myshopify\.com\/checkout/i.test(href);
-        const isCartPage = /(^|\/)cart(\/|\?|$)/i.test(href) && !/\/cart\/add/i.test(href);
-        if (!isCheckout && !isCartPage) return;
-        e.preventDefault();
-        e.stopPropagation();
-        try { _cfOpenShellCart(); } catch(_) {}
-        window._cfPendingOpen = true;
-      } catch(_) {}
-    }, true);
-
     document.addEventListener('click', async (e) => {
-
       const t = e.target;
       if (t.id==='cf-close'||t.closest('#cf-close')) { closeCart(); return; }
       if (t.id==='cf-checkout'||t.closest('#cf-checkout')) {
@@ -2169,20 +2143,6 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   // v15.7: minimal "shell" drawer — opens INSTANTLY on add-to-cart even before
   // config arrived. When config + cart are ready, the real drawer takes over
   // (renderCart() + openCart()) without the user noticing the swap.
-  //
-  // SECURITY INVARIANTS — DO NOT VIOLATE in future edits:
-  //   1. Shell MUST NOT call fetch()/XMLHttpRequest. Any network from the shell
-  //      would leak the page URL via the Referer header (no-referrer can only be
-  //      set per-request on fetch, not on background DOM resources). Keep this
-  //      function pure DOM.
-  //   2. Shell MUST NOT contain <a href> pointing to /checkout, /cart, or any
-  //      external URL. Only local <button> elements (close button) are allowed.
-  //      If a future feature needs a link, set rel="noreferrer noopener" AND
-  //      route through buildCheckoutUrl() to preserve white-store routing.
-  //   3. Shell MUST coexist with the v15.8 checkout-nav guard above (capture
-  //      phase listener that blocks /checkout navigation while !_cfConfigReady).
-  //      Removing that guard would let users escape into Shopify's native
-  //      checkout, bypassing the pre-checkout/white redirect.
   function _cfOpenShellCart() {
     try {
       if (document.getElementById('cf-shell-overlay')) return;
