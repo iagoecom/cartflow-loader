@@ -1,40 +1,7 @@
-/* OctoRoute Loader v15.8 — Fail-open ATC + checkout nav guard while config is loading. */
+/* OctoRoute Loader v15.9 — Removed theme.cart shim (PageFly TypeError is harmless; fetch wrapper handles ATC). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.8'; } catch(e) {}
-
-  // v15.5 — PageFly / Blum / Dawn compatibility shim.
-  // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
-  // after Add to Cart. When OctoRoute replaces the native theme cart, that object
-  // is undefined and the page builder throws, blocking the entire add-to-cart flow
-  // (observed on desktop product pages built with PageFly on Blum/Dawn themes).
-  // We expose harmless stubs that delegate to our own drawer refresh, so the page
-  // builder thinks the theme cart is alive and our drawer opens normally.
-  try {
-    window.theme = window.theme || {};
-    window.theme.cart = window.theme.cart || {};
-    var _stubRefresh = function(open){
-      try {
-        if (typeof window._cfDebouncedCartRefresh === 'function') {
-          window._cfDebouncedCartRefresh(!!open);
-        } else if (open && typeof window._cfOpenCart === 'function') {
-          window._cfOpenCart();
-        }
-      } catch(e) {}
-    };
-    if (typeof window.theme.cart.forceUpdateCartStatus !== 'function') {
-      window.theme.cart.forceUpdateCartStatus = function(){ _stubRefresh(true); };
-    }
-    if (typeof window.theme.cart.open !== 'function') {
-      window.theme.cart.open = function(){ _stubRefresh(true); };
-    }
-    if (typeof window.theme.cart.refresh !== 'function') {
-      window.theme.cart.refresh = function(){ _stubRefresh(false); };
-    }
-    if (typeof window.refreshCart !== 'function') {
-      window.refreshCart = function(){ _stubRefresh(true); };
-    }
-  } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.9'; } catch(e) {}
 
   // v14.5 — Multi-layer fail-closed referrer cloak.
   // Rule: a Vitrine page must NEVER send its URL as Referer to a White checkout.
@@ -1981,8 +1948,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       }
     }, 0);
   }
-  // v15.5: expose for theme.cart shim (PageFly compatibility)
-  try { window._cfDebouncedCartRefresh = debouncedCartRefresh; } catch(e) {}
+
 
   function interceptCart() {
     if (window._cfFetchPatched) return;
