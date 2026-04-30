@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.8 — Fail-open ATC + checkout nav guard while config is loading. */
+/* OctoRoute Loader v15.6 — Removed misleading "Charged in X at checkout" disclosure */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.8'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.6'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -671,12 +671,9 @@ async function getConfig(skus) {
         return parsed;
       }
     } catch(e) {}
-    // Fresh fetch with hard timeout so a slow /config never blocks ATC.
+    // Fresh fetch
     try {
-      const ctrl = new AbortController();
-      const tmo = setTimeout(() => { try { ctrl.abort(); } catch(_) {} }, 3500);
-      const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { referrerPolicy: 'no-referrer', credentials: 'omit', signal: ctrl.signal });
-      clearTimeout(tmo);
+      const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (!r.ok) { return null; }
       const data = await r.json();
       setCachedConfig(data);
@@ -998,8 +995,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
   function openCart() {
     _hadInteraction = false;
-    // v15.7: ensure the lightweight shell is removed before showing the real drawer.
-    try { if (typeof window._cfCloseShellCart === 'function') window._cfCloseShellCart(); } catch(e) {}
     const overlay = document.getElementById('cf-overlay');
     const drawer = document.getElementById('cf-drawer');
     // Reset checkout button state
@@ -1991,11 +1986,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     window.fetch = async (...args) => {
       const url = String(args[0]||'');
-      // v15.7: if it's a real cart/add and config isn't ready yet, open the shell
-      // immediately so the user sees feedback while we wait for config + drawer.
-      if (url.includes('/cart/add') && !url.includes('_cf=1') && !window._cfConfigReady) {
-        try { _cfOpenShellCart(); } catch(e) {}
-      }
       const result = await window._cfOrigFetch.apply(window, args);
       if ((url.includes('/cart/add') || url.includes('/cart/change')) && !url.includes('track-event') && !url.includes('config') && !url.includes('_cf=1')) {
         try {
@@ -2012,8 +2002,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
                 });
               } catch(e) {}
             }
-            // v15.7: mark intent so flushPending opens real drawer when config arrives.
-            if (!window._cfConfigReady) { window._cfPendingOpen = true; }
             debouncedCartRefresh(true);
           }
         } catch(e){}
@@ -2047,12 +2035,6 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
       e.preventDefault();
 
-      // v15.7: open shell immediately so the user sees feedback before /cart/add returns.
-      if (!window._cfConfigReady) {
-        try { _cfOpenShellCart(); } catch(_) {}
-        window._cfPendingOpen = true;
-      }
-
       // If theme already added via fetch/XHR, don't duplicate
       if (window._cfAddInFlight) return;
 
@@ -2070,33 +2052,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       finally { setTimeout(() => { window._cfAddInFlight = false; }, 500); }
     }, { capture: true });
 
-    // v15.8: Checkout navigation guard — while config is NOT ready, intercept any
-    // click on a link to /checkout, /cart, or *.myshopify.com/checkout and open the
-    // shell drawer instead. This prevents the user from escaping into Shopify's
-    // native checkout (which would bypass the white-store pre-checkout redirect)
-    // during the brief window between page load and config arrival.
-    // SECURITY INVARIANT: this MUST run in capture phase, BEFORE the theme's own
-    // handlers, and MUST stopPropagation so no other handler can re-fire navigation.
-    document.addEventListener('click', (e) => {
-      try {
-        if (window._cfConfigReady) return;
-        const a = e.target && e.target.closest && e.target.closest('a[href]');
-        if (!a) return;
-        const href = a.getAttribute('href') || '';
-        // Match /checkout, /checkout?..., /checkout/..., /cart, /cart?..., /cart/...,
-        // and absolute *.myshopify.com/checkout URLs.
-        const isCheckout = /(^|\/)checkout(\/|\?|$)/i.test(href) || /myshopify\.com\/checkout/i.test(href);
-        const isCartPage = /(^|\/)cart(\/|\?|$)/i.test(href) && !/\/cart\/add/i.test(href);
-        if (!isCheckout && !isCartPage) return;
-        e.preventDefault();
-        e.stopPropagation();
-        try { _cfOpenShellCart(); } catch(_) {}
-        window._cfPendingOpen = true;
-      } catch(_) {}
-    }, true);
-
     document.addEventListener('click', async (e) => {
-
       const t = e.target;
       if (t.id==='cf-close'||t.closest('#cf-close')) { closeCart(); return; }
       if (t.id==='cf-checkout'||t.closest('#cf-checkout')) {
@@ -2160,97 +2116,16 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   try {
     if (!window._cfOrigFetch) window._cfOrigFetch = window.fetch;
     interceptCart();
-    // v15.7: signal __octoReady AS SOON AS interceptors are wired.
-    // The bootstrap polls __octoReady to stop blocking add-to-cart submits.
-    // We don't need the full config to be ready for that — only the interceptors.
-    try { window.__octoReady = true; } catch(e) {}
   } catch(e) { console.warn('[CartFlow] early interceptCart failed', e); }
-
-  // v15.7: minimal "shell" drawer — opens INSTANTLY on add-to-cart even before
-  // config arrived. When config + cart are ready, the real drawer takes over
-  // (renderCart() + openCart()) without the user noticing the swap.
-  //
-  // SECURITY INVARIANTS — DO NOT VIOLATE in future edits:
-  //   1. Shell MUST NOT call fetch()/XMLHttpRequest. Any network from the shell
-  //      would leak the page URL via the Referer header (no-referrer can only be
-  //      set per-request on fetch, not on background DOM resources). Keep this
-  //      function pure DOM.
-  //   2. Shell MUST NOT contain <a href> pointing to /checkout, /cart, or any
-  //      external URL. Only local <button> elements (close button) are allowed.
-  //      If a future feature needs a link, set rel="noreferrer noopener" AND
-  //      route through buildCheckoutUrl() to preserve white-store routing.
-  //   3. Shell MUST coexist with the v15.8 checkout-nav guard above (capture
-  //      phase listener that blocks /checkout navigation while !_cfConfigReady).
-  //      Removing that guard would let users escape into Shopify's native
-  //      checkout, bypassing the pre-checkout/white redirect.
-  function _cfOpenShellCart() {
-    try {
-      if (document.getElementById('cf-shell-overlay')) return;
-      if (document.getElementById('cf-overlay')) return; // real drawer already exists
-      var ov = document.createElement('div');
-      ov.id = 'cf-shell-overlay';
-      ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999998;opacity:1;transition:opacity .2s ease;';
-      var dr = document.createElement('div');
-      dr.id = 'cf-shell-drawer';
-      dr.style.cssText = 'position:fixed;top:0;right:0;width:420px;max-width:100vw;height:100%;background:#fff;color:#111;z-index:999999;box-shadow:-4px 0 24px rgba(0,0,0,0.12);display:flex;flex-direction:column;font-family:system-ui,sans-serif;transform:translateX(0);transition:transform .25s ease;';
-      dr.innerHTML = ''
-        + '<div style="padding:14px 16px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;">'
-        +   '<strong style="font-size:16px;">Cart</strong>'
-        +   '<button id="cf-shell-close" aria-label="Close" style="all:unset;cursor:pointer;font-size:20px;line-height:1;padding:4px 8px;">&times;</button>'
-        + '</div>'
-        + '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;">'
-        +   '<div style="width:32px;height:32px;border:3px solid rgba(0,0,0,0.1);border-top-color:#333;border-radius:50%;animation:cf-spin .7s linear infinite;"></div>'
-        +   '<div style="font-size:13px;color:#666;text-align:center;">Updating your cart…</div>'
-        + '</div>';
-      // Mobile width
-      try {
-        if (window.matchMedia && window.matchMedia('(max-width:768px)').matches) {
-          dr.style.width = '100vw';
-          dr.style.maxWidth = '100vw';
-        }
-      } catch(e) {}
-      // Inline keyframes (avoid relying on injected styles)
-      var st = document.createElement('style');
-      st.textContent = '@keyframes cf-spin{to{transform:rotate(360deg);}}';
-      dr.appendChild(st);
-      ov.appendChild(dr);
-      document.body.appendChild(ov);
-      // Lock scroll (lightweight; openCart() will do the iOS-safe version later)
-      try { document.body.style.overflow = 'hidden'; } catch(e) {}
-      var close = function(){
-        try { document.body.style.overflow = ''; } catch(e) {}
-        try { ov.remove(); } catch(e) {}
-      };
-      try { ov.querySelector('#cf-shell-close').addEventListener('click', close); } catch(e) {}
-      try { ov.addEventListener('click', function(e){ if (e.target === ov) close(); }); } catch(e) {}
-      window._cfShellOpen = true;
-      window._cfCloseShellCart = close;
-    } catch(e) {}
-  }
-  function _cfCloseShellCart() {
-    try {
-      if (typeof window._cfCloseShellCart === 'function' && window._cfCloseShellCart !== _cfCloseShellCart) {
-        window._cfCloseShellCart();
-      }
-      var ov = document.getElementById('cf-shell-overlay');
-      if (ov) ov.remove();
-      try { document.body.style.overflow = ''; } catch(e) {}
-      window._cfShellOpen = false;
-    } catch(e) {}
-  }
-  try { window._cfOpenShellCart = _cfOpenShellCart; window._cfCloseShellCart = _cfCloseShellCart; } catch(e) {}
 
   // v11.11: expose synchronous opener so script-bootstrap queue can replay 'open' events
   // even before config is ready. Buffers the open intent until config arrives.
   window._cfOpenCart = function() {
     if (window._cfConfigReady && window._cfConfig && window._lastCart) {
-      try { _cfCloseShellCart(); } catch(e) {}
       try { renderCart(window._lastCart, window._cfConfig); } catch(e) {}
       try { openCart(); } catch(e) {}
     } else {
       window._cfPendingOpen = true;
-      // v15.7: open the shell immediately so the user sees feedback now.
-      _cfOpenShellCart();
     }
   };
 
@@ -2272,10 +2147,9 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
           } catch(e) {}
         });
       }
-      if (window._cfPendingOpen || window._cfShellOpen) {
+      if (window._cfPendingOpen) {
         window._cfPendingOpen = false;
         if (window._cfConfig && window._lastCart) {
-          try { _cfCloseShellCart(); } catch(e) {}
           try { renderCart(window._lastCart, window._cfConfig); } catch(e) {}
           try { openCart(); } catch(e) {}
         }
