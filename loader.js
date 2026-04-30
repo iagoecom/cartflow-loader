@@ -1,7 +1,40 @@
-/* OctoRoute Loader v15.4 — currency: normalized Shopify rates + external fallback */
+/* OctoRoute Loader v15.5 — Frankfurter-only currency + PageFly/Blum theme.cart shim */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.4'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.5'; } catch(e) {}
+
+  // v15.5 — PageFly / Blum / Dawn compatibility shim.
+  // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
+  // after Add to Cart. When OctoRoute replaces the native theme cart, that object
+  // is undefined and the page builder throws, blocking the entire add-to-cart flow
+  // (observed on desktop product pages built with PageFly on Blum/Dawn themes).
+  // We expose harmless stubs that delegate to our own drawer refresh, so the page
+  // builder thinks the theme cart is alive and our drawer opens normally.
+  try {
+    window.theme = window.theme || {};
+    window.theme.cart = window.theme.cart || {};
+    var _stubRefresh = function(open){
+      try {
+        if (typeof window._cfDebouncedCartRefresh === 'function') {
+          window._cfDebouncedCartRefresh(!!open);
+        } else if (open && typeof window._cfOpenCart === 'function') {
+          window._cfOpenCart();
+        }
+      } catch(e) {}
+    };
+    if (typeof window.theme.cart.forceUpdateCartStatus !== 'function') {
+      window.theme.cart.forceUpdateCartStatus = function(){ _stubRefresh(true); };
+    }
+    if (typeof window.theme.cart.open !== 'function') {
+      window.theme.cart.open = function(){ _stubRefresh(true); };
+    }
+    if (typeof window.theme.cart.refresh !== 'function') {
+      window.theme.cart.refresh = function(){ _stubRefresh(false); };
+    }
+    if (typeof window.refreshCart !== 'function') {
+      window.refreshCart = function(){ _stubRefresh(true); };
+    }
+  } catch(e) {}
 
   // v14.5 — Multi-layer fail-closed referrer cloak.
   // Rule: a Vitrine page must NEVER send its URL as Referer to a White checkout.
@@ -328,38 +361,21 @@
     return true;
   }
 
-  // Loads rates for any vitrine: Shopify Payments rates → cache → Frankfurter → hardcoded.
-  // Always resolves true because the hardcoded fallback is the last safety net.
+  // v15.5 — Single source of truth: Frankfurter (ECB daily rates).
+  // We DO NOT inject Shopify's /services/javascripts/currencies.js anymore — it
+  // conflicts with PageFly's `_pf_handleBlumTheme` which expects `theme.cart` to
+  // be the original theme object. Frankfurter covers all currencies our merchants
+  // use (USD/EUR/BRL/GBP/...) with <0.5% intra-day variance vs Shopify Payments.
+  // If `window.Currency.rates` already exists (theme loaded it natively), we
+  // happily use it — but we never trigger that load ourselves.
   async function loadShopifyRates() {
     try {
-      const shopifyLoaded = await new Promise((res) => {
-        try {
-          if (window.Currency && window.Currency.rates && Object.keys(window.Currency.rates).length > 0) {
-            return res(applyRates(window.Currency.rates, 'shopify'));
-          }
-          const shop = (window.Shopify && window.Shopify.shop) || window.location.host;
-          const s = document.createElement('script');
-          s.src = `https://${shop}/services/javascripts/currencies.js`;
-          s.async = true;
-          try { s.referrerPolicy = 'no-referrer'; } catch(e) {}
-          s.setAttribute('referrerpolicy', 'no-referrer');
-          let done = false;
-          const finish = (ok) => {
-            if (done) return; done = true;
-            if (ok && window.Currency && window.Currency.rates && Object.keys(window.Currency.rates).length > 0) {
-              res(applyRates(window.Currency.rates, 'shopify'));
-            } else {
-              res(false);
-            }
-          };
-          s.onload = () => finish(true);
-          s.onerror = () => finish(false);
-          setTimeout(() => finish(false), 2000);
-          document.head.appendChild(s);
-        } catch(e) { res(false); }
-      });
-      if (shopifyLoaded) return true;
+      // Opportunistic: if the theme natively exposed Shopify rates, prefer them.
+      if (window.Currency && window.Currency.rates && Object.keys(window.Currency.rates).length > 0) {
+        if (applyRates(window.Currency.rates, 'shopify-native')) return true;
+      }
 
+      // Cache (24h is fine — daily ECB rates don't move enough to matter).
       try {
         const raw = localStorage.getItem(RATES_CACHE_KEY);
         if (raw) {
@@ -368,6 +384,7 @@
         }
       } catch(e) {}
 
+      // Frankfurter (free, no rate limit, ECB-backed).
       try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 3000);
@@ -385,6 +402,7 @@
         }
       } catch(e) {}
 
+      // Last resort: hardcoded snapshot (won't drift more than a few % over months).
       applyRates(HARDCODED_RATES, 'hardcoded');
       return true;
     } catch(e) {
@@ -1961,6 +1979,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       }
     }, 0);
   }
+  // v15.5: expose for theme.cart shim (PageFly compatibility)
+  try { window._cfDebouncedCartRefresh = debouncedCartRefresh; } catch(e) {}
 
   function interceptCart() {
     if (window._cfFetchPatched) return;
