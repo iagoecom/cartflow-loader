@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.5 — Frankfurter-only currency + PageFly/Blum theme.cart shim */
+/* OctoRoute Loader v15.6 — Removed misleading "Charged in X at checkout" disclosure */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.5'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.6'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -1653,15 +1653,12 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const subtotalEl = document.getElementById('cf-subtotal');
     if (subtotalEl) subtotalEl.textContent = formatPriceDollars(finalSubtotal);
 
-    // v15.0: currency conversion disclosure — only when visitor sees a converted price
+    // v15.6: currency disclosure removed — Shopify checkout auto-converts to visitor currency
+    // when additional currencies are enabled, so the previous note was misleading.
     const curNoteEl = document.getElementById('cf-currency-note');
     if (curNoteEl) {
-      if (_visitorCurrency && _storeCurrency && _visitorCurrency !== _storeCurrency && _shopifyRates) {
-        curNoteEl.textContent = `Charged in ${_storeCurrency} at checkout`;
-        curNoteEl.style.display = 'block';
-      } else {
-        curNoteEl.style.display = 'none';
-      }
+      curNoteEl.textContent = '';
+      curNoteEl.style.display = 'none';
     }
 
     const discRow = document.getElementById('cf-discounts-row');
