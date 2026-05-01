@@ -1,4 +1,4 @@
-/* OctoRoute Loader v15.8 — Rewards/discount item-type rules: main counts+discounts, upsell counts only, addon/gift ignored. No main = no bar, no coupon. */
+/* OctoRoute Loader v15.9 — Checkout coupon falls back to reward_description when shopify_coupon empty (matches code used by create-shopify-discounts). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
   try { window.__OCTO_LOADER_VERSION = 'v15.8'; } catch(e) {}
@@ -1751,7 +1751,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         ? barCheckoutItems.reduce((a,i) => a + i.quantity, 0)
         : barCheckoutItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
       const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
-      bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon) || null;
+      // v15.9: fallback shopify_coupon → reward_description (config endpoint also fills this,
+      // but keep loader-side resilience so legacy/cached configs still work).
+      bestCoupon = [...unlockedTiers].reverse().find(t => (t.shopify_coupon || t.reward_description)) || null;
     }
     // v14.6: Shopify-standard 10 attribution keys (6 UTMs + 4 click IDs).
     var trackingKeys = ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","fbclid","gclid","ttclid","msclkid"];
@@ -1838,7 +1840,10 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     // v14.0: _octo_sid / _octo_vid / raw referrer no longer leak to public URL.
     // Session is still POST'd to backend (session_id: sid above); recovery uses
     // cart_token + customer_email Dual-Mode in shopify-webhook.
-    if (bestCoupon?.shopify_coupon) checkoutUrl += "&discount=" + encodeURIComponent(bestCoupon.shopify_coupon);
+    if (bestCoupon) {
+      var couponCode = bestCoupon.shopify_coupon || bestCoupon.reward_description || "";
+      if (couponCode) checkoutUrl += "&discount=" + encodeURIComponent(couponCode);
+    }
 
     // v14.7: removed UTM fallback entirely. Any fixed string (e.g. utm_campaign=octoroute_checkout)
     // becomes a fingerprint identifying the system across White stores. If no real source exists,
