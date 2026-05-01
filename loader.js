@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.10 — Percentage reward tiers are mutually exclusive: only the highest unlocked tier code is appended to the checkout URL (aligned with UpCart/Rebuy/Shopify). */
+/* OctoRoute Loader v15.11 — Percentage tier coupons are now Shopify DiscountCodeBxgy: upsell items satisfy the trigger but never receive the discount, so the coupon never gets rejected at checkout when an upsell is in cart. */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.10'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.11'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
