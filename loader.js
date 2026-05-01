@@ -1,4 +1,4 @@
-/* OctoRoute Loader v15.8 — Fail-open ATC + checkout nav guard while config is loading. */
+/* OctoRoute Loader v15.8 — Rewards/discount item-type rules: main counts+discounts, upsell counts only, addon/gift ignored. No main = no bar, no coupon. */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
   try { window.__OCTO_LOADER_VERSION = 'v15.8'; } catch(e) {}
@@ -1144,6 +1144,20 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     } catch(e) { return null; }
   }
 
+  // v15.8: centralized item classification — single source of truth for rewards/discount rules.
+  // - main:   counts in rewards bar, receives reward discount, sends coupon to checkout
+  // - upsell: counts in rewards bar, NEVER receives reward discount
+  // - addon:  shipping protection / gift wrap — never enters items[], handled separately
+  // - gift:   never counts, never discounts
+  function _cfIsUpsellItem(item) {
+    if (!item) return false;
+    const sku = item.sku || '';
+    return _addedUpsellSkus.has(sku) || _addedUpsellSkus.has(sku.toUpperCase());
+  }
+  function _cfIsMainItem(item, config) {
+    return !!item && !_cfIsGiftItem(item, config) && !_cfIsUpsellItem(item);
+  }
+
   function _cfIsGiftItem(item, config) {
     // Primary: property flag
     if (item && item.properties && (
@@ -1325,65 +1339,79 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const showOnEmpty = v.rewards_show_on_empty !== false;
     let rewardDiscount = 0;
     let activeRewardLabels = [];
-    const _excludeUpsells = v.exclude_upsells_from_discount === true;
-    const rewardEligibleItems = items.filter(i => !_cfIsGiftItem(i, config) && (!_excludeUpsells || !_addedUpsellSkus.has(i.sku)));
+    // v15.8: fixed item-type rules (ignores legacy v.exclude_upsells_from_discount).
+    // Bar = main + upsell. Discount base = main only. No main = no bar, no discount.
+    const mainItems = items.filter(i => _cfIsMainItem(i, config));
+    const upsellItemsArr = items.filter(i => _cfIsUpsellItem(i));
+    const barItems = mainItems.concat(upsellItemsArr); // gifts excluded; addons aren't in items[]
+    const hasMainItem = mainItems.length > 0;
     const _rawSubtotalCentsAll = items.reduce((a,i) => _cfIsGiftItem(i, config) ? a : a + i.price * i.quantity, 0);
-    const discountableSubtotalCents = rewardEligibleItems.reduce((a,i) => a + i.price * i.quantity, 0);
+    const discountableSubtotalCents = mainItems.reduce((a,i) => a + i.price * i.quantity, 0);
     const discountableSubtotal = discountableSubtotalCents / 100;
     if (rwEl) {
       rwEl.innerHTML = '';
-      if (v.rewards_enabled && tiers.length > 0 && (count > 0 || showOnEmpty)) {
-        const isQty = (v.rewards_calculation||'cart_total') === 'quantity';
-        const totalQty = rewardEligibleItems.reduce((a,i) => a + Number(i.quantity || 0), 0);
-        const totalValue = discountableSubtotal;
-        const simValue = Number(isQty ? totalQty : totalValue)||0;
-        const sorted = [...tiers].sort((a,b) => (Number(a.minimum_value)||0) - (Number(b.minimum_value)||0));
-        const rawSubtotalCents = _rawSubtotalCentsAll;
-        const rawSubtotal = rawSubtotalCents / 100;
-        const cheapestPrice = rewardEligibleItems.length > 0 ? Math.min(...rewardEligibleItems.map(i => i.price)) / 100 : 0;
-        const unlockedTiers = sorted.filter(t => simValue >= (parseFloat(t.minimum_value)||0));
-        const byType = new Map();
-        for (const tier of unlockedTiers) {
-          const amount = getRewardDiscountAmount(tier, discountableSubtotal, cheapestPrice);
-          const label = tier.reward_description || tier.reward_type;
-          const existing = byType.get(tier.reward_type);
-          if (!existing || amount > existing.amount) byType.set(tier.reward_type, { amount, label });
-        }
-        byType.forEach(({ amount, label }) => { rewardDiscount += amount; activeRewardLabels.push(label); });
-        for (const tier of unlockedTiers) {
-          if (tier.reward_type === 'shipping' || tier.reward_type === 'free_shipping') {
-            if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
+      if (v.rewards_enabled && tiers.length > 0) {
+        if (!hasMainItem) {
+          // Critical guard: only upsells/addons/gifts in cart → coupon would not apply at checkout.
+          // Show a clear message instead of a misleading full progress bar.
+          rewardDiscount = 0;
+          activeRewardLabels = [];
+          if (showOnEmpty || barItems.length > 0) {
+            rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);text-align:center;font-size:${fs(v.rewards_font_size||14)}px;opacity:0.75">Add a product to unlock rewards</div>`;
           }
+        } else if (count > 0 || showOnEmpty) {
+          const isQty = (v.rewards_calculation||'cart_total') === 'quantity';
+          // Bar progress uses main + upsell items (per spec).
+          const barTotalQty = barItems.reduce((a,i) => a + Number(i.quantity || 0), 0);
+          const barTotalValue = barItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
+          const simValue = Number(isQty ? barTotalQty : barTotalValue) || 0;
+          const sorted = [...tiers].sort((a,b) => (Number(a.minimum_value)||0) - (Number(b.minimum_value)||0));
+          // Discount amount is computed strictly over main items.
+          const cheapestPrice = mainItems.length > 0 ? Math.min(...mainItems.map(i => i.price)) / 100 : 0;
+          const unlockedTiers = sorted.filter(t => simValue >= (parseFloat(t.minimum_value)||0));
+          const byType = new Map();
+          for (const tier of unlockedTiers) {
+            const amount = getRewardDiscountAmount(tier, discountableSubtotal, cheapestPrice);
+            const label = tier.reward_description || tier.reward_type;
+            const existing = byType.get(tier.reward_type);
+            if (!existing || amount > existing.amount) byType.set(tier.reward_type, { amount, label });
+          }
+          byType.forEach(({ amount, label }) => { rewardDiscount += amount; activeRewardLabels.push(label); });
+          for (const tier of unlockedTiers) {
+            if (tier.reward_type === 'shipping' || tier.reward_type === 'free_shipping') {
+              if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
+            }
+          }
+          const nextT = sorted.find(t => (parseFloat(t.minimum_value)||0) > simValue);
+          const rem = nextT ? (isQty ? `${(parseFloat(nextT.minimum_value)||0) - simValue}` : `${formatPriceDollars((parseFloat(nextT.minimum_value)||0) - simValue)}`) : null;
+          let rawText = '';
+          if (!nextT) {
+            rawText = (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(barTotalQty));
+          } else if (nextT.title_before) {
+            rawText = nextT.title_before.replace('{remaining}', String(rem)).replace('{{remaining}}', String(rem)).replace('{{count}}', String(rem)).replace('{count}', String(rem));
+          } else {
+            rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
+          }
+          let barHtml = '<div style="display:flex;align-items:center;gap:0">';
+          let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
+          sorted.forEach((tier, idx) => {
+            const segStart = idx===0 ? 0 : parseFloat(sorted[idx-1].minimum_value)||0;
+            const segEnd = parseFloat(tier.minimum_value)||0;
+            const segRange = segEnd - segStart;
+            const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
+            const reached = simValue >= (parseFloat(tier.minimum_value)||0);
+            const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
+            const circleSize = reached ? 28 : 20;
+            barHtml += `<div style="all:unset !important;box-sizing:border-box !important;display:block !important;flex:1 !important;border-radius:9999px !important;overflow:hidden !important;height:${v.rewards_bar_height||8}px !important;background:linear-gradient(to right,${v.rewards_bar_fg_color||'#303030'} ${lp}%,${v.rewards_bar_bg_color||'#efefef'} ${lp}%) !important"></div>`;
+            barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'} !important;color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'} !important">`;
+            barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
+            barHtml += '</div>';
+            labelsHtml += '<div style="flex:1">\u200B</div>';
+            labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
+          });
+          barHtml += '</div>'; labelsHtml += '</div>';
+          rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:visible;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${fs(v.rewards_font_size||14)}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
         }
-        const nextT = sorted.find(t => (parseFloat(t.minimum_value)||0) > simValue);
-        const rem = nextT ? (isQty ? `${(parseFloat(nextT.minimum_value)||0) - simValue}` : `${formatPriceDollars((parseFloat(nextT.minimum_value)||0) - simValue)}`) : null;
-        let rawText = '';
-        if (!nextT) {
-          rawText = (v.rewards_complete_text || 'All rewards unlocked! 🎉').replace('{{count}}', String(totalQty));
-        } else if (nextT.title_before) {
-          rawText = nextT.title_before.replace('{remaining}', String(rem)).replace('{{remaining}}', String(rem)).replace('{{count}}', String(rem)).replace('{count}', String(rem));
-        } else {
-          rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
-        }
-        let barHtml = '<div style="display:flex;align-items:center;gap:0">';
-        let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
-        sorted.forEach((tier, idx) => {
-          const segStart = idx===0 ? 0 : parseFloat(sorted[idx-1].minimum_value)||0;
-          const segEnd = parseFloat(tier.minimum_value)||0;
-          const segRange = segEnd - segStart;
-          const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
-          const reached = simValue >= (parseFloat(tier.minimum_value)||0);
-          const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
-          const circleSize = reached ? 28 : 20;
-          barHtml += `<div style="all:unset !important;box-sizing:border-box !important;display:block !important;flex:1 !important;border-radius:9999px !important;overflow:hidden !important;height:${v.rewards_bar_height||8}px !important;background:linear-gradient(to right,${v.rewards_bar_fg_color||'#303030'} ${lp}%,${v.rewards_bar_bg_color||'#efefef'} ${lp}%) !important"></div>`;
-          barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'} !important;color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'} !important">`;
-          barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
-          barHtml += '</div>';
-          labelsHtml += '<div style="flex:1">\u200B</div>';
-          labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
-        });
-        barHtml += '</div>'; labelsHtml += '</div>';
-        rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:visible;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${fs(v.rewards_font_size||14)}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
       }
     }
 
@@ -1420,12 +1448,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const giftUnitPriceDollars = Number(giftCfg?.gift_price || 0) || (item.price ? item.price / 100 : 0) || (item.original_price ? item.original_price / 100 : 0);
           const giftValueDollars = giftUnitPriceDollars * item.quantity;
           const lineCompareDollars = isGift ? giftValueDollars : (compareAtPriceDollars || shopifyOrigDollars);
-          const isExcludedUpsell = _excludeUpsells && _addedUpsellSkus.has(item.sku);
-          const itemShare = (isGift || isExcludedUpsell) ? 0 : (discSubDollars > 0 ? lineTotalDollars / discSubDollars : 0);
-          const itemRewardDiscount = (isGift || isExcludedUpsell) ? 0 : rewardDiscount * itemShare;
+          // v15.8: only main items receive any reward discount share. Upsell keeps full price.
+          const isMain = _cfIsMainItem(item, config);
+          const itemShare = isMain && discSubDollars > 0 ? lineTotalDollars / discSubDollars : 0;
+          const itemRewardDiscount = isMain ? rewardDiscount * itemShare : 0;
           const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
           const hasCompareDiscount = lineCompareDollars > lineTotalDollars;
-          const hasRewardDiscount = !isGift && !isExcludedUpsell && itemRewardDiscount > 0;
+          const hasRewardDiscount = isMain && itemRewardDiscount > 0;
           const hasDis = hasCompareDiscount || hasRewardDiscount;
           const displayPrice = isGift ? 0 : (hasRewardDiscount ? discountedTotal : lineTotalDollars);
           const totalSavingsItem = isGift ? 0 : (lineCompareDollars - displayPrice);
@@ -1643,9 +1672,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
     const rawSubtotalCents = items.reduce((a,i) => _cfIsGiftItem(i, config) ? a : a + i.price * i.quantity, 0);
     const rawSubtotalDollars = rawSubtotalCents / 100;
-    const upsellTotalDollars = _excludeUpsells
-      ? items.reduce((a,i) => _addedUpsellSkus.has(i.sku) ? a + i.price * i.quantity : a, 0) / 100
-      : 0;
+    // v15.8: upsell total is always tracked separately so the reward discount only applies to main items.
+    const upsellTotalDollars = items.reduce((a,i) => _cfIsUpsellItem(i) ? a + i.price * i.quantity : a, 0) / 100;
     let addonTotal = 0;
     if (_spActive && v.shipping_protection_enabled) {
       const spPrice = Number(v.sp_price||4.99);
@@ -1712,10 +1740,19 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(",")}`;
     const tiers = config.rewards || [];
     const isQty = (v.rewards_calculation||"cart_total") === "quantity";
-    const rewardCheckoutItems = cartItems.filter(i => !_cfIsGiftItem(i, config) && (!(v.exclude_upsells_from_discount === true) || !_addedUpsellSkus.has(i.sku)));
-    const simValue = isQty ? rewardCheckoutItems.reduce((a,i) => a+i.quantity, 0) : rewardCheckoutItems.reduce((a,i) => a+i.price*i.quantity, 0)/100;
-    const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
-    const bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon);
+    // v15.8: coupon is only sent when there is at least one main item.
+    // Bar progress (and therefore the unlocked tier) is computed over main + upsell items.
+    const mainCheckoutItems = cartItems.filter(i => _cfIsMainItem(i, config));
+    const hasMainItem = mainCheckoutItems.length > 0;
+    let bestCoupon = null;
+    if (hasMainItem) {
+      const barCheckoutItems = cartItems.filter(i => _cfIsMainItem(i, config) || _cfIsUpsellItem(i));
+      const simValue = isQty
+        ? barCheckoutItems.reduce((a,i) => a + i.quantity, 0)
+        : barCheckoutItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
+      const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
+      bestCoupon = [...unlockedTiers].reverse().find(t => t.shopify_coupon) || null;
+    }
     // v14.6: Shopify-standard 10 attribution keys (6 UTMs + 4 click IDs).
     var trackingKeys = ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","fbclid","gclid","ttclid","msclkid"];
     var storedTracking = {};
@@ -2070,33 +2107,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       finally { setTimeout(() => { window._cfAddInFlight = false; }, 500); }
     }, { capture: true });
 
-    // v15.8: Checkout navigation guard — while config is NOT ready, intercept any
-    // click on a link to /checkout, /cart, or *.myshopify.com/checkout and open the
-    // shell drawer instead. This prevents the user from escaping into Shopify's
-    // native checkout (which would bypass the white-store pre-checkout redirect)
-    // during the brief window between page load and config arrival.
-    // SECURITY INVARIANT: this MUST run in capture phase, BEFORE the theme's own
-    // handlers, and MUST stopPropagation so no other handler can re-fire navigation.
-    document.addEventListener('click', (e) => {
-      try {
-        if (window._cfConfigReady) return;
-        const a = e.target && e.target.closest && e.target.closest('a[href]');
-        if (!a) return;
-        const href = a.getAttribute('href') || '';
-        // Match /checkout, /checkout?..., /checkout/..., /cart, /cart?..., /cart/...,
-        // and absolute *.myshopify.com/checkout URLs.
-        const isCheckout = /(^|\/)checkout(\/|\?|$)/i.test(href) || /myshopify\.com\/checkout/i.test(href);
-        const isCartPage = /(^|\/)cart(\/|\?|$)/i.test(href) && !/\/cart\/add/i.test(href);
-        if (!isCheckout && !isCartPage) return;
-        e.preventDefault();
-        e.stopPropagation();
-        try { _cfOpenShellCart(); } catch(_) {}
-        window._cfPendingOpen = true;
-      } catch(_) {}
-    }, true);
-
     document.addEventListener('click', async (e) => {
-
       const t = e.target;
       if (t.id==='cf-close'||t.closest('#cf-close')) { closeCart(); return; }
       if (t.id==='cf-checkout'||t.closest('#cf-checkout')) {
@@ -2169,20 +2180,6 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   // v15.7: minimal "shell" drawer — opens INSTANTLY on add-to-cart even before
   // config arrived. When config + cart are ready, the real drawer takes over
   // (renderCart() + openCart()) without the user noticing the swap.
-  //
-  // SECURITY INVARIANTS — DO NOT VIOLATE in future edits:
-  //   1. Shell MUST NOT call fetch()/XMLHttpRequest. Any network from the shell
-  //      would leak the page URL via the Referer header (no-referrer can only be
-  //      set per-request on fetch, not on background DOM resources). Keep this
-  //      function pure DOM.
-  //   2. Shell MUST NOT contain <a href> pointing to /checkout, /cart, or any
-  //      external URL. Only local <button> elements (close button) are allowed.
-  //      If a future feature needs a link, set rel="noreferrer noopener" AND
-  //      route through buildCheckoutUrl() to preserve white-store routing.
-  //   3. Shell MUST coexist with the v15.8 checkout-nav guard above (capture
-  //      phase listener that blocks /checkout navigation while !_cfConfigReady).
-  //      Removing that guard would let users escape into Shopify's native
-  //      checkout, bypassing the pre-checkout/white redirect.
   function _cfOpenShellCart() {
     try {
       if (document.getElementById('cf-shell-overlay')) return;
