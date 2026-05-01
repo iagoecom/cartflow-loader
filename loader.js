@@ -1,4 +1,4 @@
-/* OctoRoute Loader v15.12 — Single eligibility rule: switch OFF → bar/discount/checkout consider only main items; switch ON → main + upsells. Addons always excluded. Item tag shows highest active % tier (no longer overwritten by free shipping). */
+/* OctoRoute Loader v15.13 — Visual order optimized for AOV: main → upsell → gift (addons stay in fixed footer). Item TAG only shows highest unlocked % discount tier (free shipping never leaks into product tag). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
   try { window.__OCTO_LOADER_VERSION = 'v15.12'; } catch(e) {}
@@ -1448,10 +1448,21 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         const discSubDollars = discountableSubtotal;
         // Clear optimistic/loading content before reconciliation
         Array.from(itemsEl.children).forEach(n => { if (!n.hasAttribute("data-cf-item-key")) n.remove(); });
-        const newKeys = new Set(items.map(i => String(i.key)));
-        const existingNodes = itemsEl.querySelectorAll('[data-cf-item-key]');
-        existingNodes.forEach(n => { if (!newKeys.has(n.dataset.cfItemKey)) n.remove(); });
-        items.forEach((item, idx) => {
+         const newKeys = new Set(items.map(i => String(i.key)));
+         const existingNodes = itemsEl.querySelectorAll('[data-cf-item-key]');
+         existingNodes.forEach(n => { if (!newKeys.has(n.dataset.cfItemKey)) n.remove(); });
+         // v15.13: Visual order optimized for AOV — main → upsell → gift. Addons live outside items[] (fixed footer).
+         // Stable sort: keeps original add-order within each group. Does NOT affect totals/eligibility (uses raw `items`).
+         const _itemGroup = (it) => {
+           if (_cfIsGiftItem(it, config)) return 2; // gift last (passive reward, doesn't compete with paid upsell)
+           if (_cfIsUpsellItem(it)) return 1;       // upsell right after main — captures hot decision moment
+           return 0;                                 // main on top — anchors value
+         };
+         const orderedItems = items
+           .map((it, originalIdx) => ({ it, originalIdx }))
+           .sort((a, b) => _itemGroup(a.it) - _itemGroup(b.it) || a.originalIdx - b.originalIdx)
+           .map(x => x.it);
+         orderedItems.forEach((item, idx) => {
           const lineTotal = item.price * item.quantity;
           const lineTotalDollars = lineTotal / 100;
           const isGift = _cfIsGiftItem(item, config);
@@ -1509,6 +1520,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             const tagEl = existing.querySelector('[data-cf-reward-tag]');
             if (tagEl) { if (hasRewardDiscount && activeDiscountLabel) { tagEl.textContent = activeDiscountLabel; tagEl.style.display = 'inline-flex'; } else { tagEl.style.display = 'none'; } }
             existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
+            // v15.13: reposition existing node to match orderedItems order (main → upsell → gift).
+            if (itemsEl.children[idx] !== existing) {
+              if (itemsEl.children[idx]) itemsEl.insertBefore(existing, itemsEl.children[idx]);
+              else itemsEl.appendChild(existing);
+            }
            } else {
              const div = document.createElement('div');
              const giftSubtitleHtml = isGift ? `<p style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};margin:2px 0 0 0;display:flex;align-items:center;gap:4px;"><span style="display:inline-flex;width:12px;height:12px;flex-shrink:0;">${SVG_ICONS.gift}</span>Free gift${lineCompareDollars > 0 ? ` • You saved ${formatPriceDollars(lineCompareDollars)}` : ''}</p>` : '';
