@@ -1293,7 +1293,22 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     } catch(e) {}
     const v = config.visual || {};
     const items = cart.items || [];
-    const count = items.reduce((a,i) => _cfIsGiftItem(i, config) ? a : a + i.quantity, 0);
+    // v15.7: addons (Shipping Protection / Gift Wrap) must NOT count toward the
+    // header quantity nor the rewards-bar progress, because the Shopify BXGY
+    // discount excludes them on its side. Mirroring this here keeps the UI
+    // promise (e.g., "20% OFF unlocked at 4 items") in sync with what the
+    // checkout actually applies.
+    const _spSku = (v.sp_sku || '').toString();
+    const _gwSku = (v.gw_sku || '').toString();
+    const _isAddonItem = (i) => {
+      const s = (i && i.sku) || '';
+      if (s && (s === _spSku || s === _gwSku)) return true;
+      // Defensive fallback: match by product handle/title for legacy carts
+      const h = ((i && (i.handle || i.product_handle)) || '').toLowerCase();
+      if (h.includes('shipping-protection') || h.includes('gift-wrap')) return true;
+      return false;
+    };
+    const count = items.reduce((a,i) => (_cfIsGiftItem(i, config) || _isAddonItem(i)) ? a : a + i.quantity, 0);
     const accentColor = v.accent_color || '#f6f6f7';
     const accentTextColor = contrastText(accentColor);
     _fontScale = SCALE_MAP[v.font_scale] || 1.15;
@@ -1326,8 +1341,8 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     let rewardDiscount = 0;
     let activeRewardLabels = [];
     const _excludeUpsells = v.exclude_upsells_from_discount === true;
-    const rewardEligibleItems = items.filter(i => !_cfIsGiftItem(i, config) && (!_excludeUpsells || !_addedUpsellSkus.has(i.sku)));
-    const _rawSubtotalCentsAll = items.reduce((a,i) => _cfIsGiftItem(i, config) ? a : a + i.price * i.quantity, 0);
+    const rewardEligibleItems = items.filter(i => !_cfIsGiftItem(i, config) && !_isAddonItem(i) && (!_excludeUpsells || !_addedUpsellSkus.has(i.sku)));
+    const _rawSubtotalCentsAll = items.reduce((a,i) => (_cfIsGiftItem(i, config) || _isAddonItem(i)) ? a : a + i.price * i.quantity, 0);
     const discountableSubtotalCents = rewardEligibleItems.reduce((a,i) => a + i.price * i.quantity, 0);
     const discountableSubtotal = discountableSubtotalCents / 100;
     if (rwEl) {
@@ -1829,13 +1844,35 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     try {
       const itemNode = document.querySelector(`[data-cf-item-key="${key}"]`);
       if (itemNode && window._lastCart) {
-        const item = (window._lastCart.items||[]).find(i => String(i.key) === String(key));
+        const items = window._lastCart.items || [];
+        const idx = items.findIndex(i => String(i.key) === String(key));
+        const item = idx >= 0 ? items[idx] : null;
         if (item) {
           if (qty === 0) {
             // Soft-hide the row immediately to avoid waiting for fetch
             itemNode.style.transition = 'opacity 0.15s ease, max-height 0.2s ease';
             itemNode.style.overflow = 'hidden';
             itemNode.style.opacity = '0.4';
+            // Optimistically remove from local cart and recalc totals so the
+            // rewards bar (and any reward-eligible logic) updates immediately,
+            // without waiting for the /cart/change.js round-trip.
+            try {
+              const removedLineCents = (item.price || 0) * (item.quantity || 0);
+              items.splice(idx, 1);
+              if (typeof window._lastCart.item_count === 'number') {
+                window._lastCart.item_count = Math.max(0, window._lastCart.item_count - (item.quantity || 0));
+              }
+              if (typeof window._lastCart.items_subtotal_price === 'number') {
+                window._lastCart.items_subtotal_price = Math.max(0, window._lastCart.items_subtotal_price - removedLineCents);
+              }
+              if (typeof window._lastCart.total_price === 'number') {
+                window._lastCart.total_price = Math.max(0, window._lastCart.total_price - removedLineCents);
+              }
+              if (window._cfConfig) {
+                // Re-render right away so rewards bar reflects the removal.
+                renderCart(window._lastCart, window._cfConfig);
+              }
+            } catch(e) {}
           } else {
             const qtyEl = itemNode.querySelector('[data-cf-qty]');
             if (qtyEl) qtyEl.textContent = qty;
@@ -1843,8 +1880,29 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             const plusBtn = itemNode.querySelector('[data-cf-plus]');
             if (minusBtn) minusBtn.setAttribute('onclick', `cfQty('${key}',${qty-1})`);
             if (plusBtn) plusBtn.setAttribute('onclick', `cfQty('${key}',${qty+1})`);
-            // Update local cart so subsequent clicks read fresh qty
-            item.quantity = qty;
+            // Optimistically update local cart totals so rewards bar reacts
+            // immediately to +/- without waiting for the network round-trip.
+            try {
+              const prevQty = item.quantity || 0;
+              const deltaQty = qty - prevQty;
+              const deltaCents = (item.price || 0) * deltaQty;
+              item.quantity = qty;
+              if (typeof window._lastCart.item_count === 'number') {
+                window._lastCart.item_count = Math.max(0, window._lastCart.item_count + deltaQty);
+              }
+              if (typeof window._lastCart.items_subtotal_price === 'number') {
+                window._lastCart.items_subtotal_price = Math.max(0, window._lastCart.items_subtotal_price + deltaCents);
+              }
+              if (typeof window._lastCart.total_price === 'number') {
+                window._lastCart.total_price = Math.max(0, window._lastCart.total_price + deltaCents);
+              }
+              if (window._cfConfig) {
+                // Re-render only the rewards section to avoid wiping the
+                // optimistic per-item DOM tweaks above. renderCart is fast
+                // enough; per-item DOM is reconciled inside it via [data-cf-item-key].
+                renderCart(window._lastCart, window._cfConfig);
+              }
+            } catch(e) {}
           }
         }
       }
