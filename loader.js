@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.11 — Item-type discount rules: upsells count toward rewards bar but only receive discount when visual_config.exclude_upsells_from_discount === false. Addons never receive discount. */
+/* OctoRoute Loader v15.12 — Single eligibility rule: switch OFF → bar/discount/checkout consider only main items; switch ON → main + upsells. Addons always excluded. Item tag shows highest active % tier (no longer overwritten by free shipping). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.11'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.12'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -1348,54 +1348,51 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const showOnEmpty = v.rewards_show_on_empty !== false;
     let rewardDiscount = 0;
     let activeRewardLabels = [];
-    // v15.11: item-type rules respect v.exclude_upsells_from_discount.
-    // Bar = main + upsell always. Discount base = items where _cfIsDiscountable === true.
-    // No discountable item = no bar coupon (would not apply at checkout).
-    const mainItems = items.filter(i => _cfIsMainItem(i, config));
-    const upsellItemsArr = items.filter(i => _cfIsUpsellItem(i));
-    const barItems = mainItems.concat(upsellItemsArr); // gifts excluded; addons aren't in items[]
-    const discountableItems = items.filter(i => _cfIsDiscountable(i, config));
-    const hasDiscountableItem = discountableItems.length > 0;
-    const _rawSubtotalCentsAll = items.reduce((a,i) => _cfIsGiftItem(i, config) ? a : a + i.price * i.quantity, 0);
-    const discountableSubtotalCents = discountableItems.reduce((a,i) => a + i.price * i.quantity, 0);
-    const discountableSubtotal = discountableSubtotalCents / 100;
+    // v15.12: SINGLE eligibility rule — bar progress AND discount use the same item set.
+    // Switch OFF: only main items count. Switch ON: main + upsells.
+    // Addons and gifts never count.
+    const eligibleItems = items.filter(i => _cfIsDiscountable(i, config));
+    const hasEligibleItem = eligibleItems.length > 0;
+    const eligibleSubtotalCents = eligibleItems.reduce((a,i) => a + i.price * i.quantity, 0);
+    const eligibleSubtotal = eligibleSubtotalCents / 100;
+    // Aliases kept for downstream code that still references these names.
+    const discountableItems = eligibleItems;
+    const discountableSubtotal = eligibleSubtotal;
+    let activeDiscountLabel = '';
     if (rwEl) {
       rwEl.innerHTML = '';
       if (v.rewards_enabled && tiers.length > 0) {
-        if (!hasDiscountableItem) {
-          // Critical guard: only addons/gifts (or only upsells when switch OFF) → coupon would not apply.
-          // Show a clear message instead of a misleading full progress bar.
+        if (!hasEligibleItem) {
+          // No eligible item → no progress, no coupon. Addons/upsells (when switch OFF) alone don't unlock.
           rewardDiscount = 0;
           activeRewardLabels = [];
-          if (showOnEmpty || barItems.length > 0) {
+          if (showOnEmpty || items.length > 0) {
             rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);text-align:center;font-size:${fs(v.rewards_font_size||14)}px;opacity:0.75">Add a product to unlock rewards</div>`;
           }
         } else if (count > 0 || showOnEmpty) {
           const isQty = (v.rewards_calculation||'cart_total') === 'quantity';
-          // Bar progress uses main + upsell items (per spec).
-          const barTotalQty = barItems.reduce((a,i) => a + Number(i.quantity || 0), 0);
-          const barTotalValue = barItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
+          // Bar progress = same eligibility as discount.
+          const barTotalQty = eligibleItems.reduce((a,i) => a + Number(i.quantity || 0), 0);
+          const barTotalValue = eligibleSubtotal;
           const simValue = Number(isQty ? barTotalQty : barTotalValue) || 0;
           const sorted = [...tiers].sort((a,b) => (Number(a.minimum_value)||0) - (Number(b.minimum_value)||0));
-          // Discount amount is computed strictly over main items.
-          const cheapestPrice = discountableItems.length > 0 ? Math.min(...discountableItems.map(i => i.price)) / 100 : 0;
+          const cheapestPrice = eligibleItems.length > 0 ? Math.min(...eligibleItems.map(i => i.price)) / 100 : 0;
           const unlockedTiers = sorted.filter(t => simValue >= (parseFloat(t.minimum_value)||0));
-          // v15.10: tiers % são MUTUAMENTE EXCLUSIVOS (alinhado a UpCart/Rebuy/Shopify).
-          // Aplica só o maior tier % desbloqueado. Shipping/free_product são labels
-          // separados (não competem com %). Garante que preview do cart === checkout.
+          // % tiers are mutually exclusive — apply only the highest unlocked.
           const unlockedDiscountTiers = unlockedTiers.filter(t => t.reward_type === 'discount');
           const highestDiscountTier = unlockedDiscountTiers.length > 0
             ? unlockedDiscountTiers.reduce((max, t) => (Number(t.minimum_value)||0) > (Number(max.minimum_value)||0) ? t : max)
             : null;
           if (highestDiscountTier) {
-            rewardDiscount = getRewardDiscountAmount(highestDiscountTier, discountableSubtotal, cheapestPrice);
-            activeRewardLabels.push(highestDiscountTier.reward_description || highestDiscountTier.reward_type);
+            rewardDiscount = getRewardDiscountAmount(highestDiscountTier, eligibleSubtotal, cheapestPrice);
+            activeDiscountLabel = highestDiscountTier.reward_description || highestDiscountTier.reward_type || '';
+            if (activeDiscountLabel) activeRewardLabels.push(activeDiscountLabel);
           }
           for (const tier of unlockedTiers) {
             if (tier.reward_type === 'shipping' || tier.reward_type === 'free_shipping') {
               if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
             } else if (tier.reward_type === 'free_product') {
-              const amt = getRewardDiscountAmount(tier, discountableSubtotal, cheapestPrice);
+              const amt = getRewardDiscountAmount(tier, eligibleSubtotal, cheapestPrice);
               if (amt > 0) rewardDiscount += amt;
               if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
             }
@@ -1510,7 +1507,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             const delBtn = existing.querySelector('[data-cf-del]');
             if (delBtn) delBtn.setAttribute('onclick', `cfQty('${item.key}',0)`);
             const tagEl = existing.querySelector('[data-cf-reward-tag]');
-            if (tagEl) { const lastLabel = activeRewardLabels[activeRewardLabels.length - 1] || ''; if (hasRewardDiscount && lastLabel) { tagEl.textContent = lastLabel; tagEl.style.display = 'inline-flex'; } else { tagEl.style.display = 'none'; } }
+            if (tagEl) { if (hasRewardDiscount && activeDiscountLabel) { tagEl.textContent = activeDiscountLabel; tagEl.style.display = 'inline-flex'; } else { tagEl.style.display = 'none'; } }
             existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
            } else {
              const div = document.createElement('div');
@@ -1547,7 +1544,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
                  </div>
                 <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
                   ${qtyControlsHtml}
-                  <span data-cf-reward-tag style="display:${!isGift && hasRewardDiscount && activeRewardLabels.length > 0 ? 'inline-flex' : 'none'};align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${v.text_color || '#1a1a1a'};">${activeRewardLabels.length > 0 ? activeRewardLabels[activeRewardLabels.length - 1] : ''}</span>
+                  <span data-cf-reward-tag style="display:${!isGift && hasRewardDiscount && activeDiscountLabel ? 'inline-flex' : 'none'};align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:rgba(0,0,0,0.08);color:${v.text_color || '#1a1a1a'};">${activeDiscountLabel || ''}</span>
                 </div>
                </div>
             </div>`;
@@ -1759,21 +1756,17 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(",")}`;
     const tiers = config.rewards || [];
     const isQty = (v.rewards_calculation||"cart_total") === "quantity";
-    // v15.11: coupon is only sent when there is at least one DISCOUNTABLE item
-    // (Smart Collection rules in Shopify must match what loader considers eligible).
-    // Bar progress (unlocked tier) is computed over main + upsell items.
-    const discountableCheckoutItems = cartItems.filter(i => _cfIsDiscountable(i, config));
-    const hasDiscountableItem = discountableCheckoutItems.length > 0;
+    // v15.12: SAME eligibility as cart — bar progress and coupon use _cfIsDiscountable.
+    // Switch OFF: only main items count. Switch ON: main + upsells.
+    const eligibleCheckoutItems = cartItems.filter(i => _cfIsDiscountable(i, config));
+    const hasEligibleItem = eligibleCheckoutItems.length > 0;
     let bestCoupon = null;
-    if (hasDiscountableItem) {
-      const barCheckoutItems = cartItems.filter(i => _cfIsMainItem(i, config) || _cfIsUpsellItem(i));
+    if (hasEligibleItem) {
       const simValue = isQty
-        ? barCheckoutItems.reduce((a,i) => a + i.quantity, 0)
-        : barCheckoutItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
+        ? eligibleCheckoutItems.reduce((a,i) => a + i.quantity, 0)
+        : eligibleCheckoutItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
       const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
-      // v15.10: prioriza o MAIOR tier % desbloqueado (mutuamente exclusivos).
-      // Tiers % são DiscountCodeBasic — Shopify só aplica o que vier em &discount=.
-      // Shipping/free_product são Automatic e aplicam sozinhos sem cupom na URL.
+      // Highest unlocked % tier wins (mutually exclusive). Shipping/free_product are Automatic and don't need a code.
       const sortedByMin = [...unlockedTiers].sort((a,b) => (Number(b.minimum_value)||0) - (Number(a.minimum_value)||0));
       bestCoupon = sortedByMin.find(t => t.reward_type === 'discount' && (t.shopify_coupon || t.reward_description))
                 || sortedByMin.find(t => (t.shopify_coupon || t.reward_description))
