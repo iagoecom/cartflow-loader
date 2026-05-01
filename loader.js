@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.10 — Percentage reward tiers are mutually exclusive: only the highest unlocked tier code is appended to the checkout URL (aligned with UpCart/Rebuy/Shopify). */
+/* OctoRoute Loader v15.11 — Item-type discount rules: upsells count toward rewards bar but only receive discount when visual_config.exclude_upsells_from_discount === false. Addons never receive discount. */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.10'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.11'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -1144,9 +1144,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     } catch(e) { return null; }
   }
 
-  // v15.8: centralized item classification — single source of truth for rewards/discount rules.
+  // v15.11: centralized item classification — single source of truth for rewards/discount rules.
   // - main:   counts in rewards bar, receives reward discount, sends coupon to checkout
-  // - upsell: counts in rewards bar, NEVER receives reward discount
+  // - upsell: counts in rewards bar; receives discount ONLY when v.exclude_upsells_from_discount === false
   // - addon:  shipping protection / gift wrap — never enters items[], handled separately
   // - gift:   never counts, never discounts
   function _cfIsUpsellItem(item) {
@@ -1156,6 +1156,15 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   }
   function _cfIsMainItem(item, config) {
     return !!item && !_cfIsGiftItem(item, config) && !_cfIsUpsellItem(item);
+  }
+  // Returns true if the item should receive reward discount (used for discountableSubtotal + per-item share).
+  function _cfIsDiscountable(item, config) {
+    if (!item || _cfIsGiftItem(item, config)) return false;
+    if (_cfIsUpsellItem(item)) {
+      var v = (config && config.visual) || {};
+      return v.exclude_upsells_from_discount === false;
+    }
+    return true;
   }
 
   function _cfIsGiftItem(item, config) {
@@ -1339,20 +1348,22 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const showOnEmpty = v.rewards_show_on_empty !== false;
     let rewardDiscount = 0;
     let activeRewardLabels = [];
-    // v15.8: fixed item-type rules (ignores legacy v.exclude_upsells_from_discount).
-    // Bar = main + upsell. Discount base = main only. No main = no bar, no discount.
+    // v15.11: item-type rules respect v.exclude_upsells_from_discount.
+    // Bar = main + upsell always. Discount base = items where _cfIsDiscountable === true.
+    // No discountable item = no bar coupon (would not apply at checkout).
     const mainItems = items.filter(i => _cfIsMainItem(i, config));
     const upsellItemsArr = items.filter(i => _cfIsUpsellItem(i));
     const barItems = mainItems.concat(upsellItemsArr); // gifts excluded; addons aren't in items[]
-    const hasMainItem = mainItems.length > 0;
+    const discountableItems = items.filter(i => _cfIsDiscountable(i, config));
+    const hasDiscountableItem = discountableItems.length > 0;
     const _rawSubtotalCentsAll = items.reduce((a,i) => _cfIsGiftItem(i, config) ? a : a + i.price * i.quantity, 0);
-    const discountableSubtotalCents = mainItems.reduce((a,i) => a + i.price * i.quantity, 0);
+    const discountableSubtotalCents = discountableItems.reduce((a,i) => a + i.price * i.quantity, 0);
     const discountableSubtotal = discountableSubtotalCents / 100;
     if (rwEl) {
       rwEl.innerHTML = '';
       if (v.rewards_enabled && tiers.length > 0) {
-        if (!hasMainItem) {
-          // Critical guard: only upsells/addons/gifts in cart → coupon would not apply at checkout.
+        if (!hasDiscountableItem) {
+          // Critical guard: only addons/gifts (or only upsells when switch OFF) → coupon would not apply.
           // Show a clear message instead of a misleading full progress bar.
           rewardDiscount = 0;
           activeRewardLabels = [];
@@ -1367,7 +1378,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const simValue = Number(isQty ? barTotalQty : barTotalValue) || 0;
           const sorted = [...tiers].sort((a,b) => (Number(a.minimum_value)||0) - (Number(b.minimum_value)||0));
           // Discount amount is computed strictly over main items.
-          const cheapestPrice = mainItems.length > 0 ? Math.min(...mainItems.map(i => i.price)) / 100 : 0;
+          const cheapestPrice = discountableItems.length > 0 ? Math.min(...discountableItems.map(i => i.price)) / 100 : 0;
           const unlockedTiers = sorted.filter(t => simValue >= (parseFloat(t.minimum_value)||0));
           // v15.10: tiers % são MUTUAMENTE EXCLUSIVOS (alinhado a UpCart/Rebuy/Shopify).
           // Aplica só o maior tier % desbloqueado. Shipping/free_product são labels
@@ -1455,13 +1466,14 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const giftUnitPriceDollars = Number(giftCfg?.gift_price || 0) || (item.price ? item.price / 100 : 0) || (item.original_price ? item.original_price / 100 : 0);
           const giftValueDollars = giftUnitPriceDollars * item.quantity;
           const lineCompareDollars = isGift ? giftValueDollars : (compareAtPriceDollars || shopifyOrigDollars);
-          // v15.8: only main items receive any reward discount share. Upsell keeps full price.
-          const isMain = _cfIsMainItem(item, config);
-          const itemShare = isMain && discSubDollars > 0 ? lineTotalDollars / discSubDollars : 0;
-          const itemRewardDiscount = isMain ? rewardDiscount * itemShare : 0;
+          // v15.11: items where _cfIsDiscountable === true receive reward discount share.
+          // Switch OFF: only main. Switch ON: main + upsell.
+          const isDiscountable = _cfIsDiscountable(item, config);
+          const itemShare = isDiscountable && discSubDollars > 0 ? lineTotalDollars / discSubDollars : 0;
+          const itemRewardDiscount = isDiscountable ? rewardDiscount * itemShare : 0;
           const discountedTotal = Math.max(0, lineTotalDollars - itemRewardDiscount);
           const hasCompareDiscount = lineCompareDollars > lineTotalDollars;
-          const hasRewardDiscount = isMain && itemRewardDiscount > 0;
+          const hasRewardDiscount = isDiscountable && itemRewardDiscount > 0;
           const hasDis = hasCompareDiscount || hasRewardDiscount;
           const displayPrice = isGift ? 0 : (hasRewardDiscount ? discountedTotal : lineTotalDollars);
           const totalSavingsItem = isGift ? 0 : (lineCompareDollars - displayPrice);
@@ -1747,12 +1759,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(",")}`;
     const tiers = config.rewards || [];
     const isQty = (v.rewards_calculation||"cart_total") === "quantity";
-    // v15.8: coupon is only sent when there is at least one main item.
-    // Bar progress (and therefore the unlocked tier) is computed over main + upsell items.
-    const mainCheckoutItems = cartItems.filter(i => _cfIsMainItem(i, config));
-    const hasMainItem = mainCheckoutItems.length > 0;
+    // v15.11: coupon is only sent when there is at least one DISCOUNTABLE item
+    // (Smart Collection rules in Shopify must match what loader considers eligible).
+    // Bar progress (unlocked tier) is computed over main + upsell items.
+    const discountableCheckoutItems = cartItems.filter(i => _cfIsDiscountable(i, config));
+    const hasDiscountableItem = discountableCheckoutItems.length > 0;
     let bestCoupon = null;
-    if (hasMainItem) {
+    if (hasDiscountableItem) {
       const barCheckoutItems = cartItems.filter(i => _cfIsMainItem(i, config) || _cfIsUpsellItem(i));
       const simValue = isQty
         ? barCheckoutItems.reduce((a,i) => a + i.quantity, 0)
