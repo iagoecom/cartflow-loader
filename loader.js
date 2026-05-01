@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.9 — Checkout coupon falls back to reward_description when shopify_coupon empty (matches code used by create-shopify-discounts). */
+/* OctoRoute Loader v15.10 — Percentage reward tiers are mutually exclusive: only the highest unlocked tier code is appended to the checkout URL (aligned with UpCart/Rebuy/Shopify). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.8'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.10'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -1369,16 +1369,23 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           // Discount amount is computed strictly over main items.
           const cheapestPrice = mainItems.length > 0 ? Math.min(...mainItems.map(i => i.price)) / 100 : 0;
           const unlockedTiers = sorted.filter(t => simValue >= (parseFloat(t.minimum_value)||0));
-          const byType = new Map();
-          for (const tier of unlockedTiers) {
-            const amount = getRewardDiscountAmount(tier, discountableSubtotal, cheapestPrice);
-            const label = tier.reward_description || tier.reward_type;
-            const existing = byType.get(tier.reward_type);
-            if (!existing || amount > existing.amount) byType.set(tier.reward_type, { amount, label });
+          // v15.10: tiers % são MUTUAMENTE EXCLUSIVOS (alinhado a UpCart/Rebuy/Shopify).
+          // Aplica só o maior tier % desbloqueado. Shipping/free_product são labels
+          // separados (não competem com %). Garante que preview do cart === checkout.
+          const unlockedDiscountTiers = unlockedTiers.filter(t => t.reward_type === 'discount');
+          const highestDiscountTier = unlockedDiscountTiers.length > 0
+            ? unlockedDiscountTiers.reduce((max, t) => (Number(t.minimum_value)||0) > (Number(max.minimum_value)||0) ? t : max)
+            : null;
+          if (highestDiscountTier) {
+            rewardDiscount = getRewardDiscountAmount(highestDiscountTier, discountableSubtotal, cheapestPrice);
+            activeRewardLabels.push(highestDiscountTier.reward_description || highestDiscountTier.reward_type);
           }
-          byType.forEach(({ amount, label }) => { rewardDiscount += amount; activeRewardLabels.push(label); });
           for (const tier of unlockedTiers) {
             if (tier.reward_type === 'shipping' || tier.reward_type === 'free_shipping') {
+              if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
+            } else if (tier.reward_type === 'free_product') {
+              const amt = getRewardDiscountAmount(tier, discountableSubtotal, cheapestPrice);
+              if (amt > 0) rewardDiscount += amt;
               if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
             }
           }
@@ -1751,9 +1758,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         ? barCheckoutItems.reduce((a,i) => a + i.quantity, 0)
         : barCheckoutItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
       const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
-      // v15.9: fallback shopify_coupon → reward_description (config endpoint also fills this,
-      // but keep loader-side resilience so legacy/cached configs still work).
-      bestCoupon = [...unlockedTiers].reverse().find(t => (t.shopify_coupon || t.reward_description)) || null;
+      // v15.10: prioriza o MAIOR tier % desbloqueado (mutuamente exclusivos).
+      // Tiers % são DiscountCodeBasic — Shopify só aplica o que vier em &discount=.
+      // Shipping/free_product são Automatic e aplicam sozinhos sem cupom na URL.
+      const sortedByMin = [...unlockedTiers].sort((a,b) => (Number(b.minimum_value)||0) - (Number(a.minimum_value)||0));
+      bestCoupon = sortedByMin.find(t => t.reward_type === 'discount' && (t.shopify_coupon || t.reward_description))
+                || sortedByMin.find(t => (t.shopify_coupon || t.reward_description))
+                || null;
     }
     // v14.6: Shopify-standard 10 attribution keys (6 UTMs + 4 click IDs).
     var trackingKeys = ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","fbclid","gclid","ttclid","msclkid"];
