@@ -1,7 +1,7 @@
 /* OctoRoute Loader v15.13 — Visual order optimized for AOV: main → upsell → gift (addons stay in fixed footer). Item TAG only shows highest unlocked % discount tier (free shipping never leaks into product tag). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.12'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.13'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -611,7 +611,7 @@
     try {
       const cached = getCachedConfig();
       const cachedVersion = cached?.version || null;
-      const r = await fetch(`${API_URL}?token=${TOKEN}&probe=1`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
+      const r = await fetch(`${API_URL}?token=${TOKEN}&probe=1&domain=${window.location.hostname}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (!r.ok) return null;
       const fresh = await r.json();
       if (!fresh) return null;
@@ -633,7 +633,7 @@ async function getConfig(skus) {
       // Background refresh if stale
       if (!isCacheFresh()) {
         // NEW v11.7: bypass HTTP cache on background refresh
-        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' })
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}&domain=${window.location.hostname}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' })
           .then(r => r.ok ? r.json() : null)
           .then(fresh => {
             if (fresh) {
@@ -665,7 +665,7 @@ async function getConfig(skus) {
         _gwActive = parsed.visual?.gw_pre_checked || false;
         _storeCurrency = parsed.visual?.store_currency || 'USD';
         setCachedConfig(parsed);
-        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { referrerPolicy: 'no-referrer', credentials: 'omit' })
+        fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}&domain=${window.location.hostname}`, { referrerPolicy: 'no-referrer', credentials: 'omit' })
           .then(r => r.ok ? r.json() : null)
           .then(fresh => { if (fresh) { setCachedConfig(fresh); sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh)); window._cfConfig = fresh; _spActive = fresh.visual?.sp_pre_checked || false; _gwActive = fresh.visual?.gw_pre_checked || false; _storeCurrency = fresh.visual?.store_currency || 'USD'; } }).catch(()=>{});
         return parsed;
@@ -675,7 +675,7 @@ async function getConfig(skus) {
     try {
       const ctrl = new AbortController();
       const tmo = setTimeout(() => { try { ctrl.abort(); } catch(_) {} }, 3500);
-      const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}`, { referrerPolicy: 'no-referrer', credentials: 'omit', signal: ctrl.signal });
+      const r = await fetch(`${API_URL}?token=${TOKEN}${skus ? '&skus=' + skus : ''}&domain=${window.location.hostname}`, { referrerPolicy: 'no-referrer', credentials: 'omit', signal: ctrl.signal });
       clearTimeout(tmo);
       if (!r.ok) { return null; }
       const data = await r.json();
@@ -1664,7 +1664,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         const spDesc = v.sp_description||'Coverage against loss, damage, or theft.';
         const spPrice = Number(v.sp_price||4.99);
         const spPriceText = v.sp_price_type==='percentage' ? `${spPrice}%` : formatPriceDollars(spPrice);
-        addonHtml += `<div style="padding:12px 16px 0 16px"><div id="cf-addon-sp" onclick="window.cfToggleAddon('sp')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_spActive?'#059669':'rgba(0,0,0,0.10)'};background:${_spActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_spActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_spActive?SVG_ICONS.check:''}</div>${v.sp_icon?`<img src="${v.sp_icon}" alt="SP" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"/>`:''}<div><p style="font-size:${fs(12)}px;font-weight:600;margin:0">${spTitle}</p><p style="font-size:${fs(12)}px;opacity:0.6;margin:0">${spDesc}</p></div></div><span style="font-size:${fs(14)}px;font-weight:600;flex-shrink:0;margin-left:8px">${spPriceText}</span></div></div></div>`;
+        const spIconFallback = 'https://pdeontahcfqcvlxjtnka.supabase.co/storage/v1/object/public/addon-defaults/shipping-protection.png';
+        const spIcon = v.sp_icon || spIconFallback;
+        addonHtml += `<div style="padding:12px 16px 0 16px"><div id="cf-addon-sp" onclick="window.cfToggleAddon('sp')" style="border-radius:8px;padding:10px;cursor:pointer;user-select:none;transition:all 0.2s;border:1.5px solid ${_spActive?'#059669':'rgba(0,0,0,0.10)'};background:${_spActive?'rgba(5,150,105,0.04)':'transparent'}"><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${_spActive?'background:#059669':'background:transparent;border:1.5px solid rgba(0,0,0,0.2)'}">${_spActive?SVG_ICONS.check:''}</div><img src="${spIcon}" alt="SP" style="width:28px;height:28px;border-radius:4px;object-fit:cover" onerror="this.src='${spIconFallback}'"/><div><p style="font-size:${fs(12)}px;font-weight:600;margin:0">${spTitle}</p><p style="font-size:${fs(12)}px;opacity:0.6;margin:0">${spDesc}</p></div></div><span style="font-size:${fs(14)}px;font-weight:600;flex-shrink:0;margin-left:8px">${spPriceText}</span></div></div></div>`;
       }
       if (v.gift_wrap_enabled) {
         const gwTitle = v.gw_title||'Gift Wrapping';
@@ -1766,8 +1768,16 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const mappedId = skuMap[item.sku];
       if (mappedId) lineItems.push(`${mappedId}:${item.quantity}`);
     }
-    if (_spActive && v.sp_sku) { const m = skuMap[v.sp_sku]; if (m) lineItems.push(`${m}:1`); }
-    if (_gwActive && v.gw_sku) { const m = skuMap[v.gw_sku]; if (m) lineItems.push(`${m}:1`); }
+    if (_spActive && v.shipping_protection_enabled) { 
+      const spSku = v.sp_sku || 'SHIPPING-PROTECTION';
+      const m = skuMap[spSku]; 
+      if (m) lineItems.push(`${m}:1`); 
+    }
+    if (_gwActive && v.gift_wrap_enabled) { 
+      const gwSku = v.gw_sku || 'GIFT-WRAPPING';
+      const m = skuMap[gwSku]; 
+      if (m) lineItems.push(`${m}:1`); 
+    }
     if (lineItems.length === 0) return "/checkout";
     let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(",")}`;
     const tiers = config.rewards || [];
@@ -2367,7 +2377,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
     try { localStorage.removeItem(CONFIG_CACHE_KEY); } catch(e) {}
     try { sessionStorage.removeItem(`cf_config_${TOKEN}`); } catch(e) {}
     try {
-      const r = await fetch(`${API_URL}?token=${TOKEN}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
+      const r = await fetch(`${API_URL}?token=${TOKEN}&domain=${window.location.hostname}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (!r.ok) return;
       const fresh = await r.json();
       if (!fresh) return;
@@ -2392,7 +2402,7 @@ if (triggers.some(sel => { try { return t.matches?.(sel)||t.closest?.(sel); } ca
   async function _cfAutoSync() {
     try {
       const cached = getCachedConfig();
-      const r = await fetch(`${API_URL}?token=${TOKEN}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
+      const r = await fetch(`${API_URL}?token=${TOKEN}&domain=${window.location.hostname}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
       if (!r.ok) return;
       const fresh = await r.json();
       if (!fresh) return;
