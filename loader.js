@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.13 — Visual order optimized for AOV: main → upsell → gift (addons stay in fixed footer). Item TAG only shows highest unlocked % discount tier (free shipping never leaks into product tag). */
+/* OctoRoute Loader v15.14 — Carrinho ultra-rápido: imagens 80x80 forçadas via CDN/CSS + fetchpriority="high" + decoding="sync". */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.13'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.14'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -1451,7 +1451,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
          const newKeys = new Set(items.map(i => String(i.key)));
          const existingNodes = itemsEl.querySelectorAll('[data-cf-item-key]');
          existingNodes.forEach(n => { if (!newKeys.has(n.dataset.cfItemKey)) n.remove(); });
-         // v15.13: Visual order optimized for AOV — main → upsell → gift. Addons live outside items[] (fixed footer).
+         // v15.14: Visual order optimized for AOV — main → upsell → gift. Addons live outside items[] (fixed footer).
          // Stable sort: keeps original add-order within each group. Does NOT affect totals/eligibility (uses raw `items`).
          const _itemGroup = (it) => {
            if (_cfIsGiftItem(it, config)) return 2; // gift last (passive reward, doesn't compete with paid upsell)
@@ -1520,7 +1520,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             const tagEl = existing.querySelector('[data-cf-reward-tag]');
             if (tagEl) { if (hasRewardDiscount && activeDiscountLabel) { tagEl.textContent = activeDiscountLabel; tagEl.style.display = 'inline-flex'; } else { tagEl.style.display = 'none'; } }
             existing.style.borderBottom = borderBottom ? '1px solid rgba(0,0,0,0.08)' : 'none';
-            // v15.13: reposition existing node to match orderedItems order (main → upsell → gift).
+            // v15.14: reposition existing node to match orderedItems order (main → upsell → gift).
             if (itemsEl.children[idx] !== existing) {
               if (itemsEl.children[idx]) itemsEl.insertBefore(existing, itemsEl.children[idx]);
               else itemsEl.appendChild(existing);
@@ -1544,10 +1544,20 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
                : `<span data-cf-strike style="font-size:${fs(12)}px;opacity:0.5;text-decoration:line-through;${v.show_strikethrough && hasDis ? '' : 'display:none'}">${formatPriceDollars(lineCompareDollars)}</span>
                   <span data-cf-price style="font-size:${fs(15)}px;font-weight:700">${formatPriceDollars(displayPrice)}</span>
                   <span data-cf-save style="font-size:${fs(12)}px;font-weight:600;color:${v.savings_color||'#22c55e'};${v.show_strikethrough && totalSavingsItem > 0.01 ? '' : 'display:none'}">(Save ${formatPriceDollars(totalSavingsItem)})</span>`;
+             const itemImg = item.image||item.featured_image?.url||'';
+             // v15.14: Speed Optimization. Use Shopify's built-in CDN filters to load 80x80 thumbnails
+             // for the cart drawer instead of original full-size images. Drastically reduces payload
+             // size and prevents layout shifts during render.
+             let thumbImg = itemImg;
+             if (itemImg.includes('/products/') && !itemImg.includes('_80x80')) {
+               const parts = itemImg.split('.');
+               const ext = parts.pop();
+               thumbImg = parts.join('.') + '_80x80.' + ext;
+             }
              div.innerHTML = `
              <div data-cf-item-key="${item.key}" data-cf-gift="${isGift?'1':'0'}" style="display:flex;align-items:center;gap:12px;padding:16px;${borderBottom}">
                <div style="flex-shrink:0;width:80px;height:80px;border-radius:8px;overflow:hidden;background:#f5f5f5;display:flex;align-items:center;justify-content:center;position:relative;">
-                 <img src="${item.image||item.featured_image?.url||''}" onerror="this.style.display='none'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high" />
+                 <img src="${thumbImg}" onerror="this.src='${itemImg}'" alt="${productTitle}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high" />
                </div>
                <div style="flex:1;min-width:0">
                  <div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -1629,10 +1639,17 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             ${visibleUpsells.map(p => {
               const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
               const variantHtml = buildUpsellVariantHtml(p, v);
-              const imgSrc = p.image_url || p.variants?.[0]?.image_url || '';
+              const rawImg = p.image_url || p.variants?.[0]?.image_url || '';
+              // v15.14: Speed Optimization. Use 80x80 thumbnails for upsells to improve FCP.
+              let imgSrc = rawImg;
+              if (rawImg.includes('/products/') && !rawImg.includes('_80x80')) {
+                const parts = rawImg.split('.');
+                const ext = parts.pop();
+                imgSrc = parts.join('.') + '_80x80.' + ext;
+              }
               return `
                 <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
-                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
+                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" onerror="this.src='${rawImg}'" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
                   <div style="flex:1;min-width:0">
                     <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
                     <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
