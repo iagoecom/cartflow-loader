@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.14 — Carrinho ultra-rápido: imagens 80x80 forçadas via CDN/CSS + fetchpriority="high" + decoding="sync". */
+/* OctoRoute Loader v15.15 — FIX: sku_map completo no config (filtragem por SKU em v15.11 quebrava Shipping Protection no checkout). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.14'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.15'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
