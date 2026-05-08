@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.15 — FIX: sku_map completo no config (filtragem por SKU em v15.11 quebrava Shipping Protection no checkout). */
+/* OctoRoute Loader v15.16 — REVERT to simple model: free shipping = Automatic, tier % = Code, brinde = Automatic BXGY. */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.15'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.16'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -575,7 +575,9 @@
       const known = _cfReadKnownGiftVariants();
       (Array.isArray(gifts) ? gifts : []).forEach(g => {
         const vid = String(g && g.gift_shopify_variant_id || '');
+        const pid = String(g && g.gift_shopify_product_id || '');
         if (vid) known.add(vid);
+        if (pid) known.add('p:' + pid);
       });
       _cfWriteKnownGiftVariants(known);
     } catch(e) {}
@@ -1140,7 +1142,14 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const gifts = (cfg && Array.isArray(cfg.gifts)) ? cfg.gifts : [];
       if (!gifts.length || !item) return null;
       const vid = String(item.variant_id || item.id || '');
-      return gifts.find(g => String(g.gift_shopify_variant_id || '') === vid) || null;
+      const pid = String(item.product_id || '');
+      // Match por variant_id (preciso) OU product_id (resiliente — variantes
+      // podem mudar; loader pode ver item adicionado manualmente sem _gift flag).
+      return gifts.find(g => {
+        const gv = String(g.gift_shopify_variant_id || '');
+        const gp = String(g.gift_shopify_product_id || '');
+        return (gv && gv === vid) || (gp && gp === pid);
+      }) || null;
     } catch(e) { return null; }
   }
 
@@ -1176,10 +1185,15 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     try {
       if (!item) return false;
       const vid = String(item.variant_id || item.id || '');
-      if (!vid) return false;
+      const pid = String(item.product_id || '');
+      // Match por config.gifts (variant_id OU product_id) — protege contra
+      // brindes adicionados sem `_gift` flag (ex: clique manual no produto).
       if (_cfGetGiftConfigByVariant(item, config)) return true;
-      // Last-known fallback lets the loader remove stale gifts after a promotion is disabled.
-      return _cfReadKnownGiftVariants().has(vid);
+      // Last-known fallback: variant OU product memorizado em sessões anteriores.
+      const known = _cfReadKnownGiftVariants();
+      if (vid && known.has(vid)) return true;
+      if (pid && known.has('p:' + pid)) return true;
+      return false;
     } catch(e) { return false; }
   }
 
@@ -1809,11 +1823,12 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         ? eligibleCheckoutItems.reduce((a,i) => a + i.quantity, 0)
         : eligibleCheckoutItems.reduce((a,i) => a + i.price * i.quantity, 0) / 100;
       const unlockedTiers = tiers.filter(t => simValue >= (Number(t.minimum_value)||0));
-      // Highest unlocked % tier wins (mutually exclusive). Shipping/free_product are Automatic and don't need a code.
+      // Highest unlocked % tier wins (mutually exclusive). Shipping is now Code-based for better compatibility.
       const sortedByMin = [...unlockedTiers].sort((a,b) => (Number(b.minimum_value)||0) - (Number(a.minimum_value)||0));
-      bestCoupon = sortedByMin.find(t => t.reward_type === 'discount' && (t.shopify_coupon || t.reward_description))
-                || sortedByMin.find(t => (t.shopify_coupon || t.reward_description))
-                || null;
+      // v15.16: Free shipping voltou a ser Automatic (não-code) — Shopify aplica sozinha.
+      // Loader só injeta o código do tier % (Basic Code). Brinde é Automatic BXGY.
+      const discTier = sortedByMin.find(t => t.reward_type === 'discount' && (t.shopify_coupon || t.reward_description));
+      bestCoupon = discTier ? { shopify_coupon: discTier.shopify_coupon || discTier.reward_description } : null;
     }
     // v14.6: Shopify-standard 10 attribution keys (6 UTMs + 4 click IDs).
     var trackingKeys = ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","utm_id","fbclid","gclid","ttclid","msclkid"];
