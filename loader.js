@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.16 — REVERT to simple model: free shipping = Automatic, tier % = Code, brinde = Automatic BXGY. */
+/* OctoRoute Loader v15.17 — FIX: gift tier trigger now uses _cfIsDiscountable (mirrors rewards bar: excludes upsells per switch + always excludes addons). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.16'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.17'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -1204,7 +1204,10 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const items = (cart && cart.items) || [];
 
     // Build maps: trigger product_id -> {qty, total_cents}; gift variant -> item key
-    // Also accumulate cart-wide totals (excluding gifts) for reward_tier free_product triggers.
+    // v15.17: cart-wide totals for reward_tier free_product triggers use the SAME
+    // eligibility rule as the rewards bar (_cfIsDiscountable). This excludes
+    // addons always and excludes upsells unless v.exclude_upsells_from_discount === false.
+    // Per-product triggers (with trigPid) keep counting by product_id as before.
     const triggerStats = new Map();
     const giftItemsByVariant = new Map();
     let cartTotalCents = 0;
@@ -1218,8 +1221,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       }
       const lineCents = Number(it.line_price != null ? it.line_price : (it.price * (it.quantity||1)));
       const qty = Number(it.quantity || 0);
-      cartTotalCents += lineCents;
-      cartTotalQty += qty;
+      // Only eligible items (main, plus upsells when switch ON) feed tier-gift totals.
+      if (_cfIsDiscountable(it, config)) {
+        cartTotalCents += lineCents;
+        cartTotalQty += qty;
+      }
       if (!pid) continue;
       const prev = triggerStats.get(pid) || { qty: 0, cents: 0 };
       prev.qty += qty;
