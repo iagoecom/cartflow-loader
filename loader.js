@@ -1,7 +1,7 @@
-/* OctoRoute Loader v15.17 — FIX: gift tier trigger now uses _cfIsDiscountable (mirrors rewards bar: excludes upsells per switch + always excludes addons). */
+/* OctoRoute Loader v15.21 — FIX: buildCheckoutUrl refetches full sku_map when any cart SKU is missing (prevents items silently dropped from checkout permalink due to stale filtered map). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.17'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.21'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -1795,15 +1795,41 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
   }
 
   async function buildCheckoutUrl(cartItems, config) {
-    const routing = config?.routing || {};
-    const skuMap = routing.sku_map || {};
+    let routing = config?.routing || {};
+    let skuMap = routing.sku_map || {};
     const activeDomain = routing.active_store?.domain;
     const v = config?.visual || {};
     if (!activeDomain) return "/checkout";
+
+    // v15.21: garante que TODO SKU do carrinho está no map. Se algum faltar
+    // (sku_map filtrado por ?skus= ficou stale ou veio incompleto), força um
+    // refetch SEM ?skus= pra obter o map FULL e reconstrói. Sem isso, itens
+    // somem silenciosamente do permalink de checkout.
+    const cartSkus = (cartItems || []).map(i => i && i.sku).filter(Boolean);
+    const missing = cartSkus.filter(s => !skuMap[s]);
+    if (missing.length > 0) {
+      try {
+        const r = await fetch(`${API_URL}?token=${TOKEN}&domain=${window.location.hostname}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
+        if (r.ok) {
+          const fullCfg = await r.json();
+          if (fullCfg && fullCfg.routing && fullCfg.routing.sku_map && fullCfg.routing.active_store) {
+            routing = fullCfg.routing;
+            skuMap = routing.sku_map || {};
+            try { window._cfConfig = fullCfg; } catch(e) {}
+          }
+        }
+      } catch(e) {}
+    }
+
     const lineItems = [];
+    const stillMissing = [];
     for (const item of cartItems) {
       const mappedId = skuMap[item.sku];
       if (mappedId) lineItems.push(`${mappedId}:${item.quantity}`);
+      else if (item && item.sku) stillMissing.push(item.sku);
+    }
+    if (stillMissing.length > 0) {
+      try { console.warn('[octoroute] checkout skipped unmapped SKUs:', stillMissing); } catch(e) {}
     }
     if (_spActive && v.shipping_protection_enabled) { 
       const spSku = v.sp_sku || 'SHIPPING-PROTECTION';
@@ -2208,7 +2234,24 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
         try {
           const cart = _upsellPending ? await fetchShopifyCart() : (window._lastCart || await fetchShopifyCart());
           window._lastCart = cart;
-          const url = await buildCheckoutUrl(cart.items, window._cfConfig);
+          // v15.17: ANTES do checkout, busca config fresco (cache: no-store).
+          // O `active_store` retornado pelo /config é a decisão de roteamento atual
+          // (priority + current_value < goal_value). Cache stale aqui mandava venda
+          // para uma White que já tinha batido a meta — pedido errado de loja.
+          let routingConfig = window._cfConfig;
+          try {
+            const skusForCheckout = (cart.items || []).map(i => i.sku).filter(Boolean).join(',');
+            const r = await fetch(`${API_URL}?token=${TOKEN}${skusForCheckout ? '&skus=' + encodeURIComponent(skusForCheckout) : ''}&domain=${window.location.hostname}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
+            if (r.ok) {
+              const fresh = await r.json();
+              if (fresh && fresh.routing && fresh.routing.active_store) {
+                routingConfig = fresh;
+                window._cfConfig = fresh;
+                try { setCachedConfig(fresh); sessionStorage.setItem(`cf_config_${TOKEN}`, JSON.stringify(fresh)); } catch(e) {}
+              }
+            }
+          } catch(e) {}
+          const url = await buildCheckoutUrl(cart.items, routingConfig);
           trackEvent('checkout', cart.total_price/100, { addon_total: window._cfAddonTotal || 0, upsell_total: window._cfUpsellTotal || 0 });
           flushTrackQueue();
           await new Promise(r => setTimeout(r, 50));
