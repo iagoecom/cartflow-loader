@@ -1,4 +1,4 @@
-/* OctoRoute Loader v15.21 — FIX: buildCheckoutUrl refetches full sku_map when any cart SKU is missing (prevents items silently dropped from checkout permalink due to stale filtered map). */
+/* OctoRoute Loader v15.22 — Dual-key lookup: tries by_vitrine_id first, falls back by_sku. Calls heal-sku-map in background when both miss. Stays 100% backward compatible with old config payloads (uses sku_map flat when sku_map_v2 absent). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
   try { window.__OCTO_LOADER_VERSION = 'v15.21'; } catch(e) {}
@@ -1801,25 +1801,38 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
   async function buildCheckoutUrl(cartItems, config) {
     let routing = config?.routing || {};
-    let skuMap = routing.sku_map || {};
+    // v15.22: dual-key. sku_map_v2 = {by_sku, by_vitrine_id, _v:2}. Fallback
+    // ao sku_map flat (legado) garante compatibilidade com config antigo.
+    let mapV2 = routing.sku_map_v2 || null;
+    let bySku = mapV2 ? (mapV2.by_sku || {}) : (routing.sku_map || {});
+    let byVid = mapV2 ? (mapV2.by_vitrine_id || {}) : {};
     const activeDomain = routing.active_store?.domain;
+    const activeWhiteId = routing.active_store?.id;
     const v = config?.visual || {};
     if (!activeDomain) return "/checkout";
 
-    // v15.21: garante que TODO SKU do carrinho está no map. Se algum faltar
-    // (sku_map filtrado por ?skus= ficou stale ou veio incompleto), força um
-    // refetch SEM ?skus= pra obter o map FULL e reconstrói. Sem isso, itens
-    // somem silenciosamente do permalink de checkout.
-    const cartSkus = (cartItems || []).map(i => i && i.sku).filter(Boolean);
-    const missing = cartSkus.filter(s => !skuMap[s]);
-    if (missing.length > 0) {
+    // resolver(item) → variant_id_white ou null. by_vitrine_id primeiro
+    // (mais rápido e sobrevive a divergência de SKU), by_sku como fallback.
+    function resolve(item) {
+      if (!item) return null;
+      const vid = item.variant_id != null ? String(item.variant_id) : (item.id != null ? String(item.id) : null);
+      if (vid && byVid[vid]) return byVid[vid];
+      if (item.sku && bySku[item.sku]) return bySku[item.sku];
+      return null;
+    }
+
+    // v15.21+v15.22: refetch FULL map se algum item não resolveu por nenhum eixo
+    const unresolvedFirst = (cartItems || []).filter(i => !resolve(i));
+    if (unresolvedFirst.length > 0) {
       try {
         const r = await fetch(`${API_URL}?token=${TOKEN}&domain=${window.location.hostname}`, { cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit' });
         if (r.ok) {
           const fullCfg = await r.json();
-          if (fullCfg && fullCfg.routing && fullCfg.routing.sku_map && fullCfg.routing.active_store) {
+          if (fullCfg && fullCfg.routing && fullCfg.routing.active_store) {
             routing = fullCfg.routing;
-            skuMap = routing.sku_map || {};
+            mapV2 = routing.sku_map_v2 || null;
+            bySku = mapV2 ? (mapV2.by_sku || {}) : (routing.sku_map || {});
+            byVid = mapV2 ? (mapV2.by_vitrine_id || {}) : {};
             try { window._cfConfig = fullCfg; } catch(e) {}
           }
         }
@@ -1829,22 +1842,34 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     const lineItems = [];
     const stillMissing = [];
     for (const item of cartItems) {
-      const mappedId = skuMap[item.sku];
+      const mappedId = resolve(item);
       if (mappedId) lineItems.push(`${mappedId}:${item.quantity}`);
-      else if (item && item.sku) stillMissing.push(item.sku);
+      else if (item) stillMissing.push({ sku: item.sku || null, vitrine_variant_id: (item.variant_id || item.id) ? String(item.variant_id || item.id) : null });
     }
-    if (stillMissing.length > 0) {
-      try { console.warn('[octoroute] checkout skipped unmapped SKUs:', stillMissing); } catch(e) {}
+
+    // v15.22: auto-heal em background. Não bloqueia checkout — se a heal
+    // resolveu local, próximo refresh já pega. Fila de sync completo se não.
+    if (stillMissing.length > 0 && activeWhiteId) {
+      try { console.warn('[octoroute] checkout skipped unmapped items, dispatching heal:', stillMissing); } catch(e) {}
+      try {
+        fetch(`${(API_URL || '').replace(/\/config$/, '')}/heal-sku-map`, {
+          method: 'POST', cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ white_store_id: activeWhiteId, items: stillMissing.slice(0, 20) }),
+          keepalive: true,
+        }).catch(function(){});
+      } catch(e) {}
     }
-    if (_spActive && v.shipping_protection_enabled) { 
+
+    if (_spActive && v.shipping_protection_enabled) {
       const spSku = v.sp_sku || 'SHIPPING-PROTECTION';
-      const m = skuMap[spSku]; 
-      if (m) lineItems.push(`${m}:1`); 
+      const m = bySku[spSku];
+      if (m) lineItems.push(`${m}:1`);
     }
-    if (_gwActive && v.gift_wrap_enabled) { 
+    if (_gwActive && v.gift_wrap_enabled) {
       const gwSku = v.gw_sku || 'GIFT-WRAPPING';
-      const m = skuMap[gwSku]; 
-      if (m) lineItems.push(`${m}:1`); 
+      const m = bySku[gwSku];
+      if (m) lineItems.push(`${m}:1`);
     }
     if (lineItems.length === 0) return "/checkout";
     let checkoutUrl = `https://${activeDomain}/cart/${lineItems.join(",")}`;
