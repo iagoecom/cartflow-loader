@@ -1658,41 +1658,121 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
       const upsellBg = accentColor;
       const upsellText = accentTextColor;
       const isStack = (v.upsells_direction||'stack') !== 'inline';
+      const btnBg = v.button_color||'#000';
+      const btnFg = v.button_text_color||'#fff';
+      const btnRadius = v.button_radius||0;
+
+      const renderStackCard = (p) => {
+        const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
+        const variantHtml = buildUpsellVariantHtml(p, v);
+        const rawImg = p.image_url || p.variants?.[0]?.image_url || '';
+        let imgSrc = rawImg;
+        if (rawImg.includes('/products/') && !rawImg.includes('_80x80')) {
+          const parts = rawImg.split('.');
+          const ext = parts.pop();
+          imgSrc = parts.join('.') + '_80x80.' + ext;
+        }
+        return `
+          <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
+            ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" onerror="this.src='${rawImg}'" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
+            <div style="flex:1;min-width:0">
+              <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+                ${hasCompare ? `<span style="font-size:12px;text-decoration:line-through;opacity:0.5">${formatPriceDollars(p.compare_price)}</span>` : ''}
+                <span style="font-size:12px;font-weight:600">${formatPriceDollars(p.price||0)}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+                ${variantHtml}
+                <button id="cf-upsell-btn-${p.id}" onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 16px;${variantHtml ? 'flex-shrink:0;' : 'width:100%;'}font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${btnBg};color:${btnFg};border-radius:${btnRadius}px;opacity:0.85;white-space:nowrap">${v.upsells_button_text||'+Add'}</button>
+              </div>
+            </div>
+          </div>`;
+      };
+
+      const renderInlineCard = (p) => {
+        const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
+        const variantHtml = buildUpsellVariantHtml(p, v);
+        const rawImg = p.image_url || p.variants?.[0]?.image_url || '';
+        let imgSrc = rawImg;
+        if (rawImg.includes('/products/') && !rawImg.includes('_240x240')) {
+          const parts = rawImg.split('.');
+          const ext = parts.pop();
+          imgSrc = parts.join('.') + '_240x240.' + ext;
+        }
+        let discountPct = 0;
+        if (hasCompare && p.compare_price > 0) {
+          discountPct = Math.round((1 - (p.price||0) / p.compare_price) * 100);
+        }
+        const showBadge = discountPct >= 5;
+        return `
+          <div data-cf-upsell-card="${p.id}" style="scroll-snap-align:start;flex:0 0 auto;width:160px;border-radius:10px;background:${upsellBg};color:${upsellText};overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(0,0,0,0.04)">
+            <div style="position:relative;width:100%;aspect-ratio:1/1;background:rgba(0,0,0,0.06);overflow:hidden">
+              ${imgSrc ? `<img id="cf-upsell-img-${p.id}" src="${imgSrc}" onerror="this.src='${rawImg}'" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high"/>` : ''}
+              ${showBadge ? `<span style="position:absolute;top:6px;left:6px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:3px 6px;border-radius:4px;letter-spacing:0.02em">-${discountPct}%</span>` : ''}
+            </div>
+            <div style="padding:8px 10px 10px 10px;display:flex;flex-direction:column;gap:6px;flex:1">
+              <p style="font-size:12px;font-weight:600;line-height:1.3;margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:31px">${p.title}</p>
+              <div style="display:flex;align-items:baseline;gap:5px;flex-wrap:wrap">
+                <span style="font-size:13px;font-weight:700">${formatPriceDollars(p.price||0)}</span>
+                ${hasCompare ? `<span style="font-size:11px;text-decoration:line-through;opacity:0.5">${formatPriceDollars(p.compare_price)}</span>` : ''}
+              </div>
+              ${variantHtml ? `<div style="margin-top:2px">${variantHtml}</div>` : ''}
+              <button id="cf-upsell-btn-${p.id}" onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:12px;height:30px;width:100%;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${btnBg};color:${btnFg};border-radius:${btnRadius}px;margin-top:auto;white-space:nowrap;transition:opacity 0.15s">${v.upsells_button_text||'+ Add'}</button>
+            </div>
+          </div>`;
+      };
+
+      let bodyHtml;
+      if (isStack) {
+        bodyHtml = `<div style="display:flex;flex-direction:column;gap:12px">${visibleUpsells.map(renderStackCard).join('')}</div>`;
+      } else {
+        const scrollerId = 'cf-upsell-scroller';
+        bodyHtml = `
+          <div style="position:relative">
+            <button type="button" aria-label="Previous" onclick="window.cfUpsellScroll&&window.cfUpsellScroll(-1)" data-cf-upsell-prev style="all:unset;position:absolute;left:-4px;top:50%;transform:translateY(-50%);z-index:2;width:28px;height:28px;border-radius:50%;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.18);display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.2s"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <button type="button" aria-label="Next" onclick="window.cfUpsellScroll&&window.cfUpsellScroll(1)" data-cf-upsell-next style="all:unset;position:absolute;right:-4px;top:50%;transform:translateY(-50%);z-index:2;width:28px;height:28px;border-radius:50%;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.18);display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.2s"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+            <div id="${scrollerId}" role="region" aria-label="Recommended products" style="display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:2px 2px 4px 2px">
+              ${visibleUpsells.map(renderInlineCard).join('')}
+            </div>
+            <style>#${scrollerId}::-webkit-scrollbar{display:none}</style>
+          </div>`;
+      }
+
       const html = `
         <div style="padding:12px 16px;border-top:1px solid rgba(0,0,0,0.08);margin-top:16px">
           <p style="font-size:${fs(v.upsells_title_font_size||14)}px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-align:center;opacity:0.6;margin:0 0 12px 0">${v.upsells_title||'RECOMMENDED FOR YOU'}</p>
-          <div style="display:flex;${isStack?'flex-direction:column;gap:12px':'gap:8px;overflow-x:auto'}">
-            ${visibleUpsells.map(p => {
-              const hasCompare = v.upsells_show_strikethrough && p.compare_price && p.compare_price > (p.price||0);
-              const variantHtml = buildUpsellVariantHtml(p, v);
-              const rawImg = p.image_url || p.variants?.[0]?.image_url || '';
-              // v15.14: Speed Optimization. Use 80x80 thumbnails for upsells to improve FCP.
-              let imgSrc = rawImg;
-              if (rawImg.includes('/products/') && !rawImg.includes('_80x80')) {
-                const parts = rawImg.split('.');
-                const ext = parts.pop();
-                imgSrc = parts.join('.') + '_80x80.' + ext;
-              }
-              return `
-                <div data-cf-upsell-card="${p.id}" style="display:flex;align-items:flex-start;gap:12px;border-radius:8px;background:${upsellBg};color:${upsellText};padding:12px">
-                  ${imgSrc ? `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,0.06)"><img id="cf-upsell-img-${p.id}" src="${imgSrc}" onerror="this.src='${rawImg}'" alt="${p.title}" style="width:100%;height:100%;object-fit:cover;display:block" loading="eager" decoding="sync" fetchpriority="high"/></div>` : `<div style="width:80px;height:80px;border-radius:8px;flex-shrink:0;background:rgba(255,255,255,0.2)"></div>`}
-                  <div style="flex:1;min-width:0">
-                    <p style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${p.title}</p>
-                    <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
-                      ${hasCompare ? `<span style="font-size:12px;text-decoration:line-through;opacity:0.5">${formatPriceDollars(p.compare_price)}</span>` : ''}
-                      <span style="font-size:12px;font-weight:600">${formatPriceDollars(p.price||0)}</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-                      ${variantHtml}
-                      <button id="cf-upsell-btn-${p.id}" onclick="window.cfAddUpsell('${p.id}')" style="all:unset;box-sizing:border-box;font-size:13px;height:32px;padding:0 16px;${variantHtml ? 'flex-shrink:0;' : 'width:100%;'}font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;background:${v.button_color||'#000'};color:${v.button_text_color||'#fff'};border-radius:${v.button_radius||0}px;opacity:0.85;white-space:nowrap">${v.upsells_button_text||'+Add'}</button>
-                    </div>
-                  </div>
-                </div>`;
-            }).join('')}
-          </div>
+          ${bodyHtml}
         </div>`;
       const target = (v.upsells_position||'bottom') === 'top' ? topEl : btmEl;
       if (target) target.innerHTML = html;
+
+      // Wire scroller arrows (inline mode only)
+      if (!isStack) {
+        try {
+          const scroller = document.getElementById('cf-upsell-scroller');
+          const prevBtn = target && target.querySelector('[data-cf-upsell-prev]');
+          const nextBtn = target && target.querySelector('[data-cf-upsell-next]');
+          if (scroller) {
+            window.cfUpsellScroll = function(dir){
+              try {
+                const card = scroller.querySelector('[data-cf-upsell-card]');
+                const step = card ? (card.offsetWidth + 10) : 170;
+                scroller.scrollBy({ left: dir * step * 2, behavior: 'smooth' });
+              } catch(e) {}
+            };
+            const updateArrows = function(){
+              try {
+                const canPrev = scroller.scrollLeft > 4;
+                const canNext = scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 4;
+                if (prevBtn) { prevBtn.style.opacity = canPrev ? '1' : '0'; prevBtn.style.pointerEvents = canPrev ? 'auto' : 'none'; }
+                if (nextBtn) { nextBtn.style.opacity = canNext ? '1' : '0'; nextBtn.style.pointerEvents = canNext ? 'auto' : 'none'; }
+              } catch(e) {}
+            };
+            scroller.addEventListener('scroll', updateArrows, { passive: true });
+            setTimeout(updateArrows, 50);
+          }
+        } catch(e) {}
+      }
     }
 
     const addonEl = document.getElementById('cf-addon-section');
