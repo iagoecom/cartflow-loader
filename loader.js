@@ -1435,7 +1435,12 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             const segRange = segEnd - segStart;
             const lp = segRange>0 ? Math.min(Math.max((simValue-segStart)/segRange,0),1)*100 : (simValue>=segEnd?100:0);
             const reached = simValue >= (parseFloat(tier.minimum_value)||0);
-            const iconSvg = SVG_ICONS[tier.icon||'gift'] || SVG_ICONS.gift;
+            const rt = tier.reward_type;
+            const iconKey = (rt === 'shipping' || rt === 'free_shipping') ? 'truck'
+              : rt === 'discount' ? 'tag'
+              : rt === 'free_product' ? 'gift'
+              : (tier.icon || 'gift');
+            const iconSvg = SVG_ICONS[iconKey] || SVG_ICONS.gift;
             const circleSize = reached ? 28 : 20;
             barHtml += `<div style="all:unset !important;box-sizing:border-box !important;display:block !important;flex:1 !important;border-radius:9999px !important;overflow:hidden !important;height:${v.rewards_bar_height||8}px !important;background:linear-gradient(to right,${v.rewards_bar_fg_color||'#303030'} ${lp}%,${v.rewards_bar_bg_color||'#efefef'} ${lp}%) !important"></div>`;
             barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'} !important;color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'} !important">`;
