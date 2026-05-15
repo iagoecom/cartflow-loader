@@ -1427,8 +1427,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           } else {
             rawText = `Add ${rem} more to unlock ${nextT.reward_description||'the next reward'}`;
           }
-          let barHtml = '<div style="display:flex;align-items:center;gap:0">';
-          let labelsHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin-top:-2px">';
+          let barHtml = '<div style="display:flex;align-items:center;gap:0;padding-bottom:18px">';
           sorted.forEach((tier, idx) => {
             const segStart = idx===0 ? 0 : parseFloat(sorted[idx-1].minimum_value)||0;
             const segEnd = parseFloat(tier.minimum_value)||0;
@@ -1442,15 +1441,17 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
               : (tier.icon || 'gift');
             const iconSvg = SVG_ICONS[iconKey] || SVG_ICONS.gift;
             const circleSize = reached ? 28 : 20;
+            const labelText = tier.reward_description||tier.reward_type||'';
             barHtml += `<div style="all:unset !important;box-sizing:border-box !important;display:block !important;flex:1 !important;border-radius:9999px !important;overflow:hidden !important;height:${v.rewards_bar_height||8}px !important;background:linear-gradient(to right,${v.rewards_bar_fg_color||'#303030'} ${lp}%,${v.rewards_bar_bg_color||'#efefef'} ${lp}%) !important"></div>`;
-            barHtml += `<div style="flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 2px;transition:all 0.3s;width:${circleSize}px;height:${circleSize}px;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'} !important;color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'} !important">`;
+            barHtml += `<div style="position:relative;flex-shrink:0;margin:0 2px;width:${circleSize}px;height:${circleSize}px">`;
+            barHtml += `<div style="border-radius:50%;display:flex;align-items:center;justify-content:center;transition:all 0.3s;width:100%;height:100%;background:${reached?v.rewards_bar_fg_color||'#303030':v.rewards_bar_bg_color||'#efefef'} !important;color:${reached?v.rewards_complete_icon_color||'#fff':v.rewards_incomplete_icon_color||'#4D4949'} !important">`;
             barHtml += reached ? iconSvg : `<span style="display:block;width:8px;height:8px;border-radius:50%;background:${v.rewards_incomplete_icon_color||'#4D4949'};opacity:0.4"></span>`;
             barHtml += '</div>';
-            labelsHtml += '<div style="flex:1">\u200B</div>';
-            labelsHtml += `<div style="flex-shrink:0;margin:0 4px;text-align:center;white-space:nowrap"><span style="font-size:9px;opacity:0.7;line-height:1.2;font-weight:500">${tier.reward_description||tier.reward_type||''}</span></div>`;
+            barHtml += `<span style="position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);white-space:nowrap;font-size:9px;opacity:0.7;font-weight:500;line-height:1.2">${labelText}</span>`;
+            barHtml += '</div>';
           });
-          barHtml += '</div>'; labelsHtml += '</div>';
-          rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:visible;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${fs(v.rewards_font_size||14)}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}${labelsHtml}</div>`;
+          barHtml += '</div>';
+          rwEl.innerHTML = `<div style="padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.08);overflow:visible;"><div style="text-align:center;margin-bottom:6px;line-height:1.5;font-size:${fs(v.rewards_font_size||14)}px;min-height:40px;display:flex;align-items:center;justify-content:center"><span>${rawText}</span></div>${barHtml}</div>`;
         }
       }
     }
