@@ -1,7 +1,7 @@
-/* OctoRoute Loader v16.2 — SKU-only law. The ONLY truth is config.routing.sku_map. If sku_map[item.sku] is empty → item is dropped and SKU_MISS is logged. SKU parity is guaranteed by the backend (propagateSkuParity + repair-store-skus cron). v16.2: free_product tier não soma em rewardDiscount (brinde já entra como item FREE separado). */
+/* OctoRoute Loader v16.3 — SKU-only law. The ONLY truth is config.routing.sku_map. If sku_map[item.sku] is empty → item is dropped and SKU_MISS is logged. SKU parity is guaranteed by the backend (propagateSkuParity + repair-store-skus cron). v16.3: free_product tier NÃO entra em activeRewardLabels (brinde já aparece como item FREE separado com label inline "Free gift"). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.22'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.23'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -1411,12 +1411,10 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           for (const tier of unlockedTiers) {
             if (tier.reward_type === 'shipping' || tier.reward_type === 'free_shipping') {
               if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
-            } else if (tier.reward_type === 'free_product') {
-              // v15.19 FIX: brinde já entra como item separado FREE via _cfSyncGifts.
-              // NÃO somar valor do brinde em rewardDiscount (causava produto principal zerar
-              // quando rateio absorvia o cheapestPrice). Só mantém o label na barra/rodapé.
-              if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
             }
+            // v15.23 FIX: free_product NÃO entra em activeRewardLabels.
+            // Brinde já aparece como item FREE separado com label inline "Free gift".
+            // TAG no rodapé "Discounts" confundia (parecia desconto monetário).
           }
           const nextT = sorted.find(t => (parseFloat(t.minimum_value)||0) > simValue);
           const rem = nextT ? (isQty ? `${(parseFloat(nextT.minimum_value)||0) - simValue}` : `${formatPriceDollars((parseFloat(nextT.minimum_value)||0) - simValue)}`) : null;
