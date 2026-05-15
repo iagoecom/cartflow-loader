@@ -1,4 +1,4 @@
-/* OctoRoute Loader v16.0 — SKU-only law. No more dual-key, no /products.json fallback, no by_vitrine_id. The ONLY truth is config.routing.sku_map (or sku_map_v2.by_sku for back-compat). If sku_map[item.sku] is empty → item is dropped and SKU_MISS is logged. SKU parity is guaranteed by the backend (propagateSkuParity + repair-store-skus). */
+/* OctoRoute Loader v16.1 — SKU-only law. The ONLY truth is config.routing.sku_map. If sku_map[item.sku] is empty → item is dropped and SKU_MISS is logged. SKU parity is guaranteed by the backend (propagateSkuParity + repair-store-skus cron). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
   try { window.__OCTO_LOADER_VERSION = 'v15.21'; } catch(e) {}
@@ -1801,11 +1801,11 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
   async function buildCheckoutUrl(cartItems, config) {
     let routing = config?.routing || {};
-    // v16.0 — SKU-ONLY LAW. A única chave é item.sku → variant_id_white.
-    // Sem by_vitrine_id, sem /products.json, sem options matching. Se faltar,
-    // item é dropado e SKU_MISS é logado. Backend garante paridade via
+    // v16.1 — SKU-ONLY LAW. A única chave é item.sku → variant_id_white.
+    // Sem by_vitrine_id, sem /products.json, sem options matching, sem sku_map_v2.
+    // Se faltar, item é dropado e SKU_MISS é logado. Backend garante paridade via
     // propagateSkuParity (chamado em todo create/update) e cron repair.
-    let bySku = (routing.sku_map_v2 && routing.sku_map_v2.by_sku) || routing.sku_map || {};
+    let bySku = routing.sku_map || {};
     const activeDomain = routing.active_store?.domain;
     const activeWhiteId = routing.active_store?.id;
     const v = config?.visual || {};
@@ -1825,7 +1825,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const fullCfg = await r.json();
           if (fullCfg && fullCfg.routing && fullCfg.routing.active_store) {
             routing = fullCfg.routing;
-            bySku = (routing.sku_map_v2 && routing.sku_map_v2.by_sku) || routing.sku_map || {};
+            bySku = routing.sku_map || {};
             try { window._cfConfig = fullCfg; } catch(e) {}
           }
         }
