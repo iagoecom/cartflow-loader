@@ -1,7 +1,7 @@
-/* OctoRoute Loader v16.1 — SKU-only law. The ONLY truth is config.routing.sku_map. If sku_map[item.sku] is empty → item is dropped and SKU_MISS is logged. SKU parity is guaranteed by the backend (propagateSkuParity + repair-store-skus cron). */
+/* OctoRoute Loader v16.2 — SKU-only law. The ONLY truth is config.routing.sku_map. If sku_map[item.sku] is empty → item is dropped and SKU_MISS is logged. SKU parity is guaranteed by the backend (propagateSkuParity + repair-store-skus cron). v16.2: free_product tier não soma em rewardDiscount (brinde já entra como item FREE separado). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
-  try { window.__OCTO_LOADER_VERSION = 'v15.21'; } catch(e) {}
+  try { window.__OCTO_LOADER_VERSION = 'v15.22'; } catch(e) {}
 
   // v15.5 — PageFly / Blum / Dawn compatibility shim.
   // Some page builders (notably PageFly) call `theme.cart.forceUpdateCartStatus()`
@@ -1412,8 +1412,9 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
             if (tier.reward_type === 'shipping' || tier.reward_type === 'free_shipping') {
               if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
             } else if (tier.reward_type === 'free_product') {
-              const amt = getRewardDiscountAmount(tier, eligibleSubtotal, cheapestPrice);
-              if (amt > 0) rewardDiscount += amt;
+              // v15.19 FIX: brinde já entra como item separado FREE via _cfSyncGifts.
+              // NÃO somar valor do brinde em rewardDiscount (causava produto principal zerar
+              // quando rateio absorvia o cheapestPrice). Só mantém o label na barra/rodapé.
               if (!activeRewardLabels.includes(tier.reward_description)) activeRewardLabels.push(tier.reward_description);
             }
           }
