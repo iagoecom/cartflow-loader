@@ -1,4 +1,4 @@
-/* OctoRoute Loader v15.22 — Dual-key lookup: tries by_vitrine_id first, falls back by_sku. Calls heal-sku-map in background when both miss. Stays 100% backward compatible with old config payloads (uses sku_map flat when sku_map_v2 absent). */
+/* OctoRoute Loader v16.0 — SKU-only law. No more dual-key, no /products.json fallback, no by_vitrine_id. The ONLY truth is config.routing.sku_map (or sku_map_v2.by_sku for back-compat). If sku_map[item.sku] is empty → item is dropped and SKU_MISS is logged. SKU parity is guaranteed by the backend (propagateSkuParity + repair-store-skus). */
 (async () => {
   // v15.0: expose version flag immediately so script-bootstrap can detect mismatch
   try { window.__OCTO_LOADER_VERSION = 'v15.21'; } catch(e) {}
@@ -1801,27 +1801,22 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
 
   async function buildCheckoutUrl(cartItems, config) {
     let routing = config?.routing || {};
-    // v15.22: dual-key. sku_map_v2 = {by_sku, by_vitrine_id, _v:2}. Fallback
-    // ao sku_map flat (legado) garante compatibilidade com config antigo.
-    let mapV2 = routing.sku_map_v2 || null;
-    let bySku = mapV2 ? (mapV2.by_sku || {}) : (routing.sku_map || {});
-    let byVid = mapV2 ? (mapV2.by_vitrine_id || {}) : {};
+    // v16.0 — SKU-ONLY LAW. A única chave é item.sku → variant_id_white.
+    // Sem by_vitrine_id, sem /products.json, sem options matching. Se faltar,
+    // item é dropado e SKU_MISS é logado. Backend garante paridade via
+    // propagateSkuParity (chamado em todo create/update) e cron repair.
+    let bySku = (routing.sku_map_v2 && routing.sku_map_v2.by_sku) || routing.sku_map || {};
     const activeDomain = routing.active_store?.domain;
     const activeWhiteId = routing.active_store?.id;
     const v = config?.visual || {};
     if (!activeDomain) return "/checkout";
 
-    // resolver(item) → variant_id_white ou null. by_vitrine_id primeiro
-    // (mais rápido e sobrevive a divergência de SKU), by_sku como fallback.
     function resolve(item) {
-      if (!item) return null;
-      const vid = item.variant_id != null ? String(item.variant_id) : (item.id != null ? String(item.id) : null);
-      if (vid && byVid[vid]) return byVid[vid];
-      if (item.sku && bySku[item.sku]) return bySku[item.sku];
-      return null;
+      if (!item || !item.sku) return null;
+      return bySku[item.sku] || null;
     }
 
-    // v15.21+v15.22: refetch FULL map se algum item não resolveu por nenhum eixo
+    // Refetch UMA VEZ se sobrar item sem SKU map — pode ser config stale.
     const unresolvedFirst = (cartItems || []).filter(i => !resolve(i));
     if (unresolvedFirst.length > 0) {
       try {
@@ -1830,9 +1825,7 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
           const fullCfg = await r.json();
           if (fullCfg && fullCfg.routing && fullCfg.routing.active_store) {
             routing = fullCfg.routing;
-            mapV2 = routing.sku_map_v2 || null;
-            bySku = mapV2 ? (mapV2.by_sku || {}) : (routing.sku_map || {});
-            byVid = mapV2 ? (mapV2.by_vitrine_id || {}) : {};
+            bySku = (routing.sku_map_v2 && routing.sku_map_v2.by_sku) || routing.sku_map || {};
             try { window._cfConfig = fullCfg; } catch(e) {}
           }
         }
@@ -1844,21 +1837,13 @@ cart-drawer,cart-notification,cart-notification-drawer,side-cart,ajax-cart,
     for (const item of cartItems) {
       const mappedId = resolve(item);
       if (mappedId) lineItems.push(`${mappedId}:${item.quantity}`);
-      else if (item) stillMissing.push({ sku: item.sku || null, vitrine_variant_id: (item.variant_id || item.id) ? String(item.variant_id || item.id) : null });
+      else if (item) stillMissing.push({ sku: item.sku || null, title: item.title || '', vitrine_variant_id: (item.variant_id || item.id) ? String(item.variant_id || item.id) : null });
     }
 
-    // v15.22: auto-heal em background. Não bloqueia checkout — se a heal
-    // resolveu local, próximo refresh já pega. Fila de sync completo se não.
-    if (stillMissing.length > 0 && activeWhiteId) {
-      try { console.warn('[octoroute] checkout skipped unmapped items, dispatching heal:', stillMissing); } catch(e) {}
-      try {
-        fetch(`${(API_URL || '').replace(/\/config$/, '')}/heal-sku-map`, {
-          method: 'POST', cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ white_store_id: activeWhiteId, items: stillMissing.slice(0, 20) }),
-          keepalive: true,
-        }).catch(function(){});
-      } catch(e) {}
+    // v16.0 — falha alta no console pra catch operacional. Backend roda
+    // repair-store-skus em cron pra auto-curar sem depender do cliente.
+    if (stillMissing.length > 0) {
+      try { console.error('[octoroute] SKU_MISS — items dropped from checkout (no entry in sku_map):', stillMissing); } catch(e) {}
     }
 
     if (_spActive && v.shipping_protection_enabled) {
